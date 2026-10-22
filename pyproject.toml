@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mediareaderx"
+description = "Portable, offline viewer for HEIC, AVIF, JPEG XL, camera RAW and modern video on Windows."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dynamic = ["version"]
+dependencies = [
+    "PySide6-Essentials==6.12.0",
+    "PySide6-Addons==6.12.0",
+    "pillow==13.0.0",
+    "pillow-heif==1.8.1",
+    "imagecodecs==2026.10.10",
+    "rawpy==0.27.1",
+    "numpy==2.5.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1", "av==19.0.2", "pyinstaller==6.22.3", "pip-licenses==5.5.5", "cyclonedx-bom==7.5.0"]
+
+[project.scripts]
+mediareaderx = "mediareaderx.app:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "mediareaderx.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mediareaderx = ["assets/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src", "tools"]

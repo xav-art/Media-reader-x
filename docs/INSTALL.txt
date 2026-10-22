@@ -1,0 +1,92 @@
+MEDIA READER - INSTALLATION GUIDE
+=================================
+
+Media Reader x opens photos and videos that Windows cannot open on its own:
+iPhone photos (HEIC), AVIF, JPEG XL, Photoshop (PSD, PSB), camera RAW (Canon, Nikon, Sony, Fuji...),
+and videos in H.265/HEVC, VP9 and AV1 (MKV, WebM, MOV, MP4).
+
+It works fully offline. Your files never leave your computer.
+You do NOT need admin rights to install it.
+
+
+OPTION 1: INSTALL (recommended)
+-------------------------------
+1. Download "MediaReaderX-<version>-Setup.exe" from this folder.
+2. Double-click it.
+   If Windows shows "Windows protected your PC", click "More info" and then
+   "Run anyway". (The installer is not code-signed. You can check the file
+   against SHA256SUMS.txt, see below.)
+3. Click Next until the end. Keep "Add Media Reader x to Open with" selected.
+4. Media Reader x is now in the Start menu.
+
+To open a file: right-click it > Open with > Media Reader x.
+To always open a type with it (for example .HEIC): right-click the file >
+Open with > Choose another app > Media Reader x > "Always".
+
+Updates: run the newer Setup.exe. It replaces the old version.
+Coming from "Media Reader" 1.0? The installer removes it for you and keeps
+your settings. Set your default apps again once (step above).
+Uninstall: Settings > Apps > Installed apps > Media Reader x > Uninstall.
+
+
+OPTION 2: PORTABLE (no installation)
+------------------------------------
+1. Download "MediaReaderX-<version>-Portable.zip".
+2. Right-click > Extract All, to a folder you own (for example Documents).
+3. Open the folder and double-click MediaReaderX.exe.
+Files can also be dragged onto the window.
+
+
+KEYBOARD SHORTCUTS
+------------------
+Ctrl+O          Open a file (File > Open recent lists the last 10)
+Ctrl+Shift+O    Open a folder (or drag a folder into the window)
+F5              Slideshow (View > Slideshow interval: 3, 5 or 10 seconds)
+Left / Right    Previous / next file in the folder (also PgUp / PgDn,
+                Home / End, and the mouse back / forward buttons)
+Space           Next photo, or play / pause a video
+T               Show or hide the thumbnail strip (click a thumbnail to open it)
+I               Show or hide the metadata panel (camera, date, GPS)
+F / 1           Fit to window / actual size (100%)
++ / -           Zoom in / out (or use the mouse wheel)
+R / Shift+R     Rotate right / left (only the view; the file is not changed)
+Ctrl+C          Copy the picture (paste it into Teams, Outlook, Word...)
+Ctrl+Shift+C    Copy the file path
+Ctrl+S          Save a copy as JPG or PNG (e.g. to share an iPhone photo)
+Ctrl+P          Print several pictures on one A4 page, or save the pages as a PDF
+Ctrl+click      Select several thumbnails to print (Shift+click selects a range)
+Del             Move the file to the Recycle Bin (restore it from there)
+L               Play the motion part of an iPhone Live Photo
+Shift+Left/Right  Back / forward 5 seconds in a video
+[ / ]           Slower / faster video (0.25x to 2x)
+Ctrl+L          Loop video
+M               Mute
+F11             Full screen: only the photo or video shows (Esc to exit)
+
+View > Theme switches between Light, Dark and "Same as Windows".
+File > "Remove location (GPS) when saving" removes GPS from saved copies.
+
+
+CHECK THE DOWNLOAD (optional)
+-----------------------------
+In PowerShell:
+    Get-FileHash .\MediaReaderX-<version>-Setup.exe -Algorithm SHA256
+The value must match the line in SHA256SUMS.txt.
+
+
+FOR IT / SILENT INSTALL
+-----------------------
+    MediaReaderX-<version>-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
+Installs per user into %LOCALAPPDATA%\Programs\Media Reader x (no elevation).
+Health check:  "%LOCALAPPDATA%\Programs\Media Reader x\MediaReaderX.exe" --self-test
+   (exit code 0 = all codecs OK; report in %LOCALAPPDATA%\MediaReaderX\selftest.txt)
+Settings and logs: %LOCALAPPDATA%\MediaReaderX (logs contain file types and sizes,
+never file paths or names). No network access, no telemetry.
+Software bill of materials: MediaReaderX-<version>-sbom.cdx.json (CycloneDX).
+
+
+PROBLEMS?
+---------
+Help > Open log folder, and send the newest mediareaderx.log file to the person
+who shared Media Reader x with you, or open an issue at
+https://github.com/xav-art/Media-reader-x/issues
