@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 392" role="img" aria-labelledby="t d">
+  <title id="t">Supported formats</title>
+  <desc id="d">70 file types: images, camera RAW, vector, video and motion.</desc>
+  <rect width="960" height="392" rx="16" fill="#EEF1F7"/>
+  <g font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+    <text x="40" y="96" font-size="72" font-weight="700" letter-spacing="-2" fill="#C23A1A">70</text>
+    <text x="144" y="92" font-size="28" fill="#1C2540">file types in one viewer</text>
+    <line x1="40" x2="920" y1="128" y2="128" stroke="#C5CCDB" stroke-width="1"/><text x="40" y="156" font-size="18" font-weight="600" fill="#4A5570">Images</text><text x="200" y="156" font-size="17" fill="#1C2540">HEIC/HEIF, AVIF, JPEG XL, WebP, QOI, PSD, PSB, JPG, PNG, GIF, TIFF, BMP, TGA, DDS</text><line x1="40" x2="920" y1="172" y2="172" stroke="#C5CCDB" stroke-width="1"/><text x="40" y="200" font-size="18" font-weight="600" fill="#4A5570">Camera RAW</text><text x="200" y="200" font-size="17" fill="#1C2540">CR2, CR3, NEF, ARW, DNG, RAF, ORF, RW2 and 16 more</text><line x1="40" x2="920" y1="216" y2="216" stroke="#C5CCDB" stroke-width="1"/><text x="40" y="244" font-size="18" font-weight="600" fill="#4A5570">Vector</text><text x="200" y="244" font-size="17" fill="#1C2540">SVG, SVGZ</text><line x1="40" x2="920" y1="260" y2="260" stroke="#C5CCDB" stroke-width="1"/><text x="40" y="288" font-size="18" font-weight="600" fill="#4A5570">Video</text><text x="200" y="288" font-size="17" fill="#1C2540">HEVC, H.264, VP9, AV1, ProRes in MP4, MOV, MKV, WebM, AVI, M2TS</text><line x1="40" x2="920" y1="304" y2="304" stroke="#C5CCDB" stroke-width="1"/><text x="40" y="332" font-size="18" font-weight="600" fill="#4A5570">Motion</text><text x="200" y="332" font-size="17" fill="#1C2540">iPhone Live Photos, animated GIF, WebP, AVIF, JXL</text>
+  </g>
+</svg>
