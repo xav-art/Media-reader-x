@@ -1,7 +1,9 @@
 """Headless health check: ``MediaReaderX.exe --self-test``.
 
-Encodes tiny images in memory with each bundled codec, decodes them back, and
-confirms Qt's FFmpeg multimedia backend loads. Results go to the log and to
+Decodes tiny images with each bundled codec (HEIC and AVIF from committed probe
+files, so no HEVC or AV1 encoder runs), confirms Qt's FFmpeg multimedia backend
+loads, and checks that the decoder lock, video container check and SVG picture
+check refuse crafted files. Results go to the log and to
 %LOCALAPPDATA%\\MediaReaderX\\selftest.txt; the exit code is 0 only if all pass.
 Used by build.ps1 against the frozen app, and useful for IT support.
 """
@@ -32,14 +34,107 @@ def _roundtrip(ext: str, save) -> None:
             raise AssertionError(f"unexpected size {img.size}")
 
 
-def _check_heic():
-    import pillow_heif
+def _decode_probe(name: str) -> None:
+    """Decode a committed probe file: the app never runs the bundled HEVC (x265) or AV1 encoders."""
+    from mediareaderx.decoders import decode
+    from mediareaderx.resources import resource_dir
 
-    _roundtrip(".heic", lambda im, p: pillow_heif.from_pillow(im).save(p, quality=90))
+    img = decode(resource_dir() / name)
+    if (img.size.width(), img.size.height()) != (16, 8):
+        raise AssertionError(f"unexpected size {img.size}")
+    red = (img.frames[0].pixel(8, 4) >> 16) & 0xFF
+    if not 180 <= red <= 220:  # the probe is RGB (200, 50, 50); lossy coding moves it a little
+        raise AssertionError(f"unexpected colour {img.frames[0].pixel(8, 4):#x}")
+
+
+def _check_heic():
+    _decode_probe("probe.heic")
 
 
 def _check_avif():
-    _roundtrip(".avif", lambda im, p: im.save(p, quality=90))
+    _decode_probe("probe.avif")
+
+
+def _expect_refused(fn, *args) -> None:
+    from mediareaderx.content import Refused
+    from mediareaderx.decoders import DecodeError
+
+    try:
+        fn(*args)
+    except (Refused, DecodeError):
+        return
+    raise AssertionError(f"{getattr(fn, '__name__', fn)} accepted a file it must refuse")
+
+
+def _check_image_lock():
+    import pillow_heif
+    from PIL import Image
+
+    from mediareaderx.decoders import decode, register_plugins
+
+    register_plugins()
+    if "HEIF" in Image.SAVE or "HEIF" in Image.SAVE_ALL:
+        raise AssertionError("the HEIF writer (x265) is registered")
+    if pillow_heif.options.DISABLE_SECURITY_LIMITS:
+        raise AssertionError("libheif security limits are off")
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = Path(tmp) / "png.heic"
+        Image.new("RGB", (4, 4), (0, 0, 255)).save(fake, "PNG")
+        img = decode(fake)  # opens with the PNG decoder only, and says so
+        if img.format_name != "PNG" or not img.notice:
+            raise AssertionError(f"PNG named .heic: {img.format_name}, notice {img.notice!r}")
+        program = Path(tmp) / "program.heic"
+        program.write_bytes(b"MZ" + bytes(510))
+        _expect_refused(decode, program)
+
+
+def _check_video_lock():
+    import os
+
+    from mediareaderx.content import check_video
+
+    if os.environ.get("QT_FFMPEG_PROTOCOL_WHITELIST") != "file":
+        raise AssertionError("FFmpeg may open protocols other than local files")
+    with tempfile.TemporaryDirectory() as tmp:
+        for name, data in (("png.mp4", b"\x89PNG\r\n\x1a\n" + bytes(64)),
+                           ("playlist.mp4", b"#EXTM3U\n#EXT-X-VERSION:3\nhttp://example.invalid/a.ts\n")):
+            path = Path(tmp) / name
+            path.write_bytes(data)
+            _expect_refused(check_video, path)
+        ok = Path(tmp) / "ok.mp4"
+        ok.write_bytes(b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00isomiso2" + bytes(64))
+        check_video(ok)
+
+
+def _check_svg_lock():
+    from mediareaderx.content import load_svg
+
+    head = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="4" height="4">'
+    with tempfile.TemporaryDirectory() as tmp:
+        linked = Path(tmp) / "linked.svg"
+        linked.write_text(head + '<image href="C:/Windows/Web/Wallpaper/x.jpg" width="4" height="4"/></svg>')
+        _expect_refused(load_svg, linked)
+        tiff = Path(tmp) / "tiff.svg"
+        tiff.write_text(head + '<image xlink:href="data:image/png;base64,SUkqAAgAAAA=" width="4" height="4"/></svg>')
+        _expect_refused(load_svg, tiff)
+        plain = Path(tmp) / "plain.svg"
+        plain.write_text(head + '<rect width="4" height="4"/></svg>')
+        load_svg(plain)
+        # An embedded JPEG must still draw: proves Qt's JPEG plugin survived the bundle trim.
+        import base64
+
+        from PIL import Image
+
+        from mediareaderx.decoders import decode
+
+        buf = io.BytesIO()
+        Image.new("RGB", (8, 8), (220, 30, 30)).save(buf, "JPEG", quality=95)
+        jpeg = Path(tmp) / "jpeg.svg"
+        jpeg.write_text(head + '<image href="data:image/jpeg;base64,' + base64.b64encode(buf.getvalue()).decode()
+                        + '" width="4" height="4"/></svg>')
+        img = decode(jpeg)
+        if (img.frames[0].pixel(img.frames[0].width() // 2, img.frames[0].height() // 2) >> 16) & 0xFF < 180:
+            raise AssertionError("an embedded JPEG did not draw (Qt JPEG plugin missing?)")
 
 
 def _check_jxl():
@@ -114,6 +209,8 @@ CHECKS = {
     "WebP": _check_webp, "Photoshop PSD (psd-tools)": _check_psd, "Camera RAW (LibRaw)": _check_raw,
     "SVG (Qt)": _check_svg,
     "Video (Qt FFmpeg backend)": _check_video_backend, "Print and PDF (Qt)": _check_printing,
+    "Image decoder lock": _check_image_lock, "Video container check": _check_video_lock,
+    "SVG picture check": _check_svg_lock,
 }
 
 

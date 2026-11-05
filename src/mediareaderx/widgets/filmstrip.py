@@ -152,6 +152,7 @@ class Filmstrip(QDockWidget):
         self._tasks: dict[str, _ThumbTask] = {}  # queued or running image thumbnails
         self._video_pending: set[str] = set()
         self._failed: set[str] = set()  # no thumbnail possible: do not retry
+        self._releasing: set[str] = set()  # moving to the Recycle Bin: do not open
         # One shared placeholder per (badge, video): 5 000 files cost a few tiles, not 731 MB.
         self._placeholders: dict[tuple[str, bool], QIcon] = {}
         self._pool = QThreadPool(self)
@@ -209,6 +210,16 @@ class Filmstrip(QDockWidget):
         rows = sorted(self.list.row(item) for item in self.list.selectedItems())
         return [self._files[r] for r in rows if 0 <= r < len(self._files)]
 
+    def release(self, path: Path) -> None:
+        """End a video thumbnail grab of ``path`` and open it no more until ``end_release``: its file must stay
+        closed while it moves to the Recycle Bin."""
+        self._releasing.add(str(path))
+        self._video.release(str(path))
+        self._video_pending.discard(str(path))
+
+    def end_release(self, path: Path) -> None:
+        self._releasing.discard(str(path))
+
     def invalidate(self, path: Path) -> None:
         self._cache.pop(str(path), None)
         self._failed.discard(str(path))
@@ -234,7 +245,8 @@ class Filmstrip(QDockWidget):
         order = sorted(range(lo, hi), key=lambda i: (not start <= i <= start + span, abs(i - start)))
         for i in order:
             key = str(self._files[i])
-            if key in self._cache or key in self._tasks or key in self._video_pending or key in self._failed:
+            if (key in self._cache or key in self._tasks or key in self._video_pending or key in self._failed
+                    or key in self._releasing):
                 continue
             if kind_of(key) is MediaKind.VIDEO:
                 self._video_pending.add(key)

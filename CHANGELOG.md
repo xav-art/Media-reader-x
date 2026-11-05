@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.5.0 - 2026-11-04
+
+Security: each file reaches only the one decoder for its content.
+
+- The app reads the first bytes of each file and picks the one decoder for that content. Pillow's
+  other 29 openers (EPS through Ghostscript, WMF through Windows GDI, FITS, PCD...) can no longer be
+  reached by a crafted file. A file whose content does not match its extension (WebP saved as .jpg,
+  a PNG favicon named .ico) still opens, and the status bar says what it really is, for example
+  "PNG file named .heic". Programs, archives, PDFs and text files with a picture extension are
+  refused with a message that says what they are.
+- Videos must start with a known container signature, and FFmpeg's own probe must agree on that
+  container, before the player gets them. Playlists (HLS, concat, SDP) and pictures named as videos
+  are refused. FFmpeg may open local files only (protocol whitelist "file"), never a URL.
+- SVG files may embed only PNG and JPEG pictures, checked by content. Links to other files or web
+  addresses, other embedded formats and DTD entity declarations are refused, and .svgz files are
+  inflated with a 64 MB cap. Before, an SVG could make Qt load any picture file on the PC.
+- The HEIF writer is unregistered: nothing in the app can reach the bundled x265 encoder. The
+  self-test now decodes committed HEIC and AVIF samples instead of encoding them.
+- Six unused Qt image plugins are no longer shipped (GIF, ICNS, TGA, TIFF, WBMP, WebP).
+- Built with Python 3.14.10 (3.12 gets no more Windows installers, so its security fixes never ship)
+  and rawpy 0.28.0 (LibRaw 0.22.2).
+- The SBOM now lists the 28 native libraries inside the wheels (libheif, libde265, LibRaw, libjxl,
+  dav1d, libwebp, FFmpeg, Qt and others) with CPE ids, so vulnerability scanners can match them.
+- The build runs pip-audit and grype and stops on any High or Critical finding without a dated
+  exception in `packaging/vuln-exceptions.json`.
+
+Fixed:
+
+- AV1 video on a PC without AV1 graphics hardware showed a black picture with no message. Qt's
+  FFmpeg decodes AV1 only on the GPU and reports nothing when it cannot. The app now notices when an
+  AV1 clip plays with no picture (for 3 seconds, or most of a short clip, or to its end), stops it
+  and says why. After that, thumbnails skip AV1 files at once instead of waiting 4 seconds each,
+  until an AV1 clip shows a picture. A Live Photo clip that fails goes back to the photo. The README
+  and INSTALL.txt no longer say that AV1 plays everywhere.
+- Delete sometimes said a file "could not be moved to the Recycle Bin" when it was only open for a
+  moment: by an antivirus scan, or by the app itself (a RAW or PSD still loading, a video thumbnail).
+  The app now waits up to 2 seconds for the file to close. A Live Photo video now goes to the Recycle
+  Bin only together with its photo, and if the video cannot move, the status bar says so.
+
 ## 1.4.1 - 2026-10-21
 
 - Fixed: iPhone JPEGs saved with an HDR gain map (MPO files, also some Samsung, Fuji and Nikon photos)

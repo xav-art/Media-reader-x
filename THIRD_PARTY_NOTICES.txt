@@ -2732,7 +2732,7 @@ For the latest licensing terms and conditions, see https://www.qt.io/terms-condi
 For further information use the contact form at https://www.qt.io/contact-us.
 
 ==============================================================================
-rawpy 0.27.1  (MIT)
+rawpy 0.28.0  (MIT)
 https://github.com/letmaik/rawpy
 ------------------------------------------------------------------------------
 The MIT License (MIT)

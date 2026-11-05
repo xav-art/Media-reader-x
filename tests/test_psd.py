@@ -87,8 +87,8 @@ def test_psd_without_a_flattened_image_explains_the_fix(tmp_path, qapp):
 def test_damaged_and_fake_psd_files_give_plain_errors(tmp_path, qapp):
     fake = tmp_path / "fake.psd"
     fake.write_bytes(b"not a photoshop file at all, just text" * 4)
-    with pytest.raises(DecodeError, match="not a Photoshop file"):
-        decode(fake)
+    with pytest.raises(DecodeError, match="contains a text file, not a picture"):
+        decode(fake)  # the content check names what the file really is (1.5.0)
     good = tmp_path / "good.psd"
     _make_psd(good, _base())
     cut = tmp_path / "cut.psd"

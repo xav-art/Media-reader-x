@@ -46,6 +46,25 @@ ASSOCIATION_EXTS = frozenset({
 } | RAW_EXTS)
 
 
+# The content families each extension normally holds (see content.py). A file whose content is another
+# supported family still opens, with the decoder for its real content and a notice.
+IMAGE_FAMILIES: dict[str, tuple[str, ...]] = {
+    ".jpg": ("jpeg",), ".jpeg": ("jpeg",), ".jpe": ("jpeg",), ".jfif": ("jpeg",),
+    ".png": ("png",), ".apng": ("png",), ".gif": ("gif",), ".bmp": ("bmp", "dib"), ".dib": ("bmp", "dib"),
+    ".tif": ("tiff",), ".tiff": ("tiff",), ".webp": ("webp",), ".ico": ("ico",),
+    ".heic": ("heic",), ".heif": ("heic", "avif"), ".hif": ("heic", "avif"), ".avif": ("avif",),
+    ".jxl": ("jxl",), ".psd": ("psd",), ".psb": ("psd",), ".tga": ("tga",),
+    ".ppm": ("pnm",), ".pgm": ("pnm",), ".pbm": ("pnm",), ".pnm": ("pnm",), ".dds": ("dds",), ".qoi": ("qoi",),
+}
+
+VIDEO_FAMILIES: dict[str, tuple[str, ...]] = {
+    ".mp4": ("isobmff",), ".m4v": ("isobmff",), ".mov": ("isobmff",), ".qt": ("isobmff",),
+    ".3gp": ("isobmff",), ".3g2": ("isobmff",), ".mkv": ("matroska",), ".webm": ("matroska",),
+    ".avi": ("avi",), ".wmv": ("asf",), ".ts": ("mpegts",), ".mts": ("mpegts",), ".m2ts": ("mpegts",),
+    ".flv": ("flv",), ".ogv": ("ogg",), ".mpg": ("mpegps", "mpegts"), ".mpeg": ("mpegps", "mpegts"),
+}
+
+
 def kind_of(path: str | Path) -> MediaKind | None:
     """Return the media kind for ``path`` based on its extension, or None."""
     ext = Path(path).suffix.lower()

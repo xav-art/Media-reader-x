@@ -8,7 +8,6 @@ hidden QMediaPlayer on the UI thread, one at a time.
 from __future__ import annotations
 
 import gc
-import io
 import logging
 from collections import deque
 from pathlib import Path
@@ -17,17 +16,16 @@ from PIL import ExifTags, Image, ImageOps
 from PySide6.QtCore import QObject, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtMultimedia import QMediaPlayer, QVideoSink
-from PySide6.QtSvg import QSvgRenderer
 
-from mediareaderx import config
-from mediareaderx.decoders import (EXIF_TRANSPOSE, JPEG_FORMATS, JXL_THREADS, ORIENTATION_TAG, PSD_EXTS, check_pixels,
-                                   jxl_size, ndarray_to_qimage, open_psd, pil_to_qimage, register_plugins)
+from mediareaderx import av1check, config, content
+from mediareaderx.decoders import (EXIF_TRANSPOSE, JPEG_FORMATS, JXL_THREADS, ORIENTATION_TAG, check_pixels, jxl_size,
+                                   load_svg, ndarray_to_qimage, open_pillow, open_psd, pil_to_qimage,
+                                   register_plugins, route)
 from mediareaderx.formats import MediaKind, kind_of
 
 log = logging.getLogger(__name__)
 
 THUMB_SIDE = 192
-JPEG_EXTS = frozenset({".jpg", ".jpeg", ".jpe", ".jfif"})
 EXIF_HEAD_BYTES = 128 * 1024  # the EXIF block (APP1) is at most 64 KB, near the start of the file
 JPEG_THUMB_OFFSET, JPEG_THUMB_LENGTH = 0x0201, 0x0202  # IFD1 tags of the embedded preview
 PSD_PREVIEW_MIN = 112  # the strip tile's width in logical pixels
@@ -54,7 +52,7 @@ def _raw_thumb(path: Path, side: int) -> QImage | None:
         except (rawpy.LibRawNoThumbnailError, rawpy.LibRawUnsupportedThumbnailError):
             thumb = None
         if thumb is not None and thumb.format == rawpy.ThumbFormat.JPEG:
-            with Image.open(io.BytesIO(thumb.data)) as im:
+            with open_pillow(thumb.data, "jpeg") as im:  # the camera's preview: JPEG only, never another plugin
                 return _pil_thumb(im, side)
         if thumb is not None and thumb.format == rawpy.ThumbFormat.BITMAP:
             return _fit(ndarray_to_qimage(thumb.data), side)
@@ -71,7 +69,7 @@ def _exif_thumbnail(path: Path, side: int) -> QImage | None:
     try:
         with path.open("rb") as f:
             head = f.read(EXIF_HEAD_BYTES)
-        with Image.open(io.BytesIO(head)) as im:
+        with open_pillow(head, "jpeg") as im:
             if im.format not in JPEG_FORMATS:
                 return None
             check_pixels(*im.size)
@@ -86,7 +84,9 @@ def _exif_thumbnail(path: Path, side: int) -> QImage | None:
         data = tiff[offset:offset + length]
         if len(data) != length:
             return None
-        with Image.open(io.BytesIO(data)) as thumb:
+        if content.sniff(data[:16]) is not content.FAMILIES["jpeg"]:
+            return None  # EXIF also allows an uncompressed TIFF preview: the caller decodes the photo instead
+        with open_pillow(data, "jpeg") as thumb:
             if max(thumb.size) < side:
                 return None
             thumb.load()
@@ -121,7 +121,7 @@ def make_thumbnail(path: str | Path, side: int = THUMB_SIDE) -> QImage | None:
         if kind is MediaKind.RAW:
             return _raw_thumb(path, side)
         if kind is MediaKind.SVG:
-            renderer = QSvgRenderer(str(path))
+            renderer = load_svg(path)  # from checked bytes: never resolves links next to the file
             if not renderer.isValid():
                 return None
             size = renderer.defaultSize().scaled(side, side, Qt.AspectRatioMode.KeepAspectRatio)
@@ -131,7 +131,8 @@ def make_thumbnail(path: str | Path, side: int = THUMB_SIDE) -> QImage | None:
             renderer.render(painter)
             painter.end()
             return img
-        if path.suffix.lower() == ".jxl":
+        way = route(path, content.read_head(path))  # the same single decoder as the viewer
+        if way.family == "jxl":
             import imagecodecs
 
             data = path.read_bytes()
@@ -140,11 +141,11 @@ def make_thumbnail(path: str | Path, side: int = THUMB_SIDE) -> QImage | None:
                 check_pixels(*size)
             arr = imagecodecs.jpegxl_decode(data, numthreads=JXL_THREADS)
             return _fit(ndarray_to_qimage(arr[0] if arr.ndim == 4 else arr), side)
-        if path.suffix.lower() in PSD_EXTS:
+        if way.family == "psd":
             return _psd_thumb(path, side)
-        if path.suffix.lower() in JPEG_EXTS and (embedded := _exif_thumbnail(path, side)) is not None:
+        if way.family == "jpeg" and (embedded := _exif_thumbnail(path, side)) is not None:
             return embedded
-        with Image.open(io.BytesIO(path.read_bytes())) as im:
+        with open_pillow(path.read_bytes(), way.family) as im:
             check_pixels(*im.size)
             return _pil_thumb(im, side)
     except Exception:  # a bad file must never break the strip
@@ -171,7 +172,8 @@ class VideoThumbnailer(QObject):
         self._player.errorOccurred.connect(lambda *_: self._finish(None))
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
-        self._timer.timeout.connect(lambda: self._finish(None))
+        self._timer.timeout.connect(self._on_timeout)
+        self._start_pos = 0  # position after the seek, to measure playing time for the AV1 check
 
     def request(self, path: str) -> None:
         if path != self._current and path not in self._queue:
@@ -182,6 +184,15 @@ class VideoThumbnailer(QObject):
     def clear(self) -> None:
         self._queue.clear()
 
+    def release(self, path: str) -> None:
+        """Drop ``path`` and close it now if a grab is running (the file is about to move to the Recycle Bin)."""
+        try:
+            self._queue.remove(path)
+        except ValueError:
+            pass
+        if self._current == path:
+            self._finish(None)
+
     @property
     def current(self) -> str | None:
         return self._current
@@ -191,13 +202,22 @@ class VideoThumbnailer(QObject):
             self._current = None
             return
         self._current = self._queue.popleft()
+        try:
+            content.check_video(self._current)  # FFmpeg only ever sees a known container
+        except content.Refused:
+            self._finish(None)
+            return
         self._player.setSource(QUrl.fromLocalFile(self._current))
         self._timer.start(self.TIMEOUT_MS)
 
     def _on_status(self, status) -> None:
         if status == QMediaPlayer.MediaStatus.LoadedMedia and self._current:
+            if av1check.unavailable() and av1check.is_av1(self._player):
+                self._finish(None)  # this PC already showed it cannot decode AV1: do not wait for the timeout
+                return
             # Skip a second in (or 10%) to avoid black fade-in frames.
-            self._player.setPosition(min(1000, self._player.duration() // 10))
+            self._start_pos = min(1000, self._player.duration() // 10)
+            self._player.setPosition(self._start_pos)
             self._player.play()
         elif status == QMediaPlayer.MediaStatus.InvalidMedia:
             self._finish(None)
@@ -206,7 +226,18 @@ class VideoThumbnailer(QObject):
         if self._current and frame.isValid():
             img = frame.toImage()
             if not img.isNull():
+                if av1check.is_av1(self._player):
+                    av1check.mark_available()  # this PC can decode AV1 after all
                 self._finish(_fit(img))
+
+    def _on_timeout(self) -> None:
+        # Same evidence as the viewer: an AV1 clip that played for a while (or to its end) with no frame.
+        if self._current and av1check.is_av1(self._player):
+            ended = self._player.mediaStatus() == QMediaPlayer.MediaStatus.EndOfMedia
+            played = max(0, self._player.position() - self._start_pos)
+            if av1check.no_picture(played, self._player.duration(), ended):
+                av1check.mark_unavailable()
+        self._finish(None)
 
     def _finish(self, img: QImage | None) -> None:
         if self._current is None:

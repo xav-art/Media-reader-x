@@ -127,7 +127,16 @@ def test_slideshow_continues_past_a_missing_file(window, folder, monkeypatch):
     monkeypatch.setattr(MainWindow, "slideshow_seconds", property(lambda self: 0))
     files = list_media(folder)
     window.open_path(files[0])
-    files[1].unlink()
+
+    def unlinked():
+        # The neighbour preload (or an antivirus scan) may hold files[1] open for a moment: Windows then refuses.
+        try:
+            files[1].unlink()
+            return True
+        except PermissionError:
+            return False
+
+    assert wait_until(unlinked)
     window.act_slideshow.trigger()
     assert wait_until(lambda: window.current not in (files[0], files[1]) and window.current is not None, 10000)
     window.toggle_slideshow(False)

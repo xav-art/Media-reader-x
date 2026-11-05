@@ -22,7 +22,7 @@ from PySide6.QtCore import QByteArray, QSize, Qt
 from PySide6.QtGui import QImage, QPainter
 from PySide6.QtSvg import QSvgRenderer
 
-from mediareaderx import config
+from mediareaderx import config, content
 from mediareaderx.formats import MediaKind, kind_of
 from mediareaderx.metadata import MetaItem, exif_items, file_items
 
@@ -43,6 +43,7 @@ class DecodedImage:
     metadata: list[MetaItem] = field(default_factory=list)
     exif_bytes: bytes | None = None  # original EXIF, reused by Save as
     full_size: QSize | None = None  # the picture's real size when the frames are a smaller screen copy
+    notice: str | None = None  # set when the content is another format than the extension says
 
     @property
     def size(self) -> QSize:
@@ -90,17 +91,48 @@ def _shrink_pil(im: Image.Image, max_side: int | None) -> Image.Image:
     return im
 
 
+# The one Pillow plugin each content family may reach (content.py decides the family). Pillow tries
+# only the plugins named in ``formats=``, so its other openers (EPS, WMF through GDI, FITS...) stay unused.
+PILLOW_PLUGINS = {
+    "jpeg": "JPEG", "png": "PNG", "gif": "GIF", "bmp": "BMP", "dib": "DIB", "tiff": "TIFF", "webp": "WEBP",
+    "ico": "ICO", "heic": "HEIF", "avif": "AVIF", "qoi": "QOI", "dds": "DDS", "pnm": "PPM", "tga": "TGA",
+}
+
+
 def register_plugins() -> None:
     """Register optional Pillow plugins once (HEIF via libheif)."""
     global _registered
-    if _registered:
-        return
-    import pillow_heif
+    if not _registered:
+        import pillow_heif
 
-    # AVIF is decoded by Pillow's native plugin; libheif only handles HEIC/HEIF.
-    pillow_heif.register_heif_opener(thumbnails=False)
-    Image.MAX_IMAGE_PIXELS = config.MAX_IMAGE_PIXELS
-    _registered = True
+        pillow_heif.options.DISABLE_SECURITY_LIMITS = False  # libheif's own limits (the default), never relaxed
+        # AVIF is decoded by Pillow's native plugin; libheif only handles HEIC/HEIF.
+        pillow_heif.register_heif_opener(thumbnails=False)
+        Image.MAX_IMAGE_PIXELS = config.MAX_IMAGE_PIXELS
+        _registered = True
+    # Viewing only: unregister the HEIF writer, so nothing in the app can reach the bundled x265 encoder.
+    # On every call (two dict lookups), so a later registration elsewhere cannot bring it back.
+    Image.SAVE.pop("HEIF", None)
+    Image.SAVE_ALL.pop("HEIF", None)
+
+
+def open_pillow(data: bytes, family: str) -> Image.Image:
+    """Open ``data`` with the single Pillow plugin for ``family``. Raises DecodeError if it does not match."""
+    register_plugins()
+    try:
+        return Image.open(io.BytesIO(data), formats=(PILLOW_PLUGINS[family],))
+    except UnidentifiedImageError as exc:
+        raise DecodeError("The file is damaged or is not a supported image.") from exc
+    except Image.DecompressionBombError as exc:
+        raise DecodeError("The image is too large to open safely.") from exc
+
+
+def route(path: Path, head: bytes) -> content.Route:
+    """The content family to decode ``path`` with. Raises DecodeError for content the app does not open."""
+    try:
+        return content.route_image(path.suffix, head)
+    except content.Refused as exc:
+        raise DecodeError(str(exc)) from exc
 
 
 def warm_up() -> None:
@@ -110,9 +142,9 @@ def warm_up() -> None:
         import imagecodecs  # noqa: F401  (JPEG XL)
         import rawpy  # noqa: F401  (LibRaw)
 
-        buf = io.BytesIO()
-        Image.new("RGB", (8, 8)).save(buf, "AVIF")
-        with Image.open(io.BytesIO(buf.getvalue())) as im:
+        from mediareaderx.resources import resource_dir
+
+        with open_pillow((resource_dir() / "probe.avif").read_bytes(), "avif") as im:
             im.load()
     except Exception:  # warming is an optimisation only
         log.debug("Codec warm-up skipped", exc_info=True)
@@ -262,18 +294,11 @@ EXIF_TRANSPOSE = {2: Image.Transpose.FLIP_LEFT_RIGHT, 3: Image.Transpose.ROTATE_
               8: Image.Transpose.ROTATE_90}
 
 
-def _decode_pillow(path: Path, max_side: int | None = None) -> DecodedImage:
-    try:
-        # Read into memory first, so the file is not held open (and locked) while decoding.
-        im = Image.open(io.BytesIO(path.read_bytes()))
-    except UnidentifiedImageError as exc:
-        raise DecodeError("The file is damaged or is not a supported image.") from exc
-    except Image.DecompressionBombError as exc:
-        raise DecodeError("The image is too large to open safely.") from exc
-
-    with im:
+def _decode_pillow(data: bytes, family: str, max_side: int | None = None) -> DecodedImage:
+    # The caller read the file into memory, so it is not held open (and locked) while decoding.
+    with open_pillow(data, family) as im:
         check_pixels(*im.size)
-        fmt = "JPEG (MPO)" if im.format == "MPO" else im.format or path.suffix.lstrip(".").upper()
+        fmt = "JPEG (MPO)" if im.format == "MPO" else im.format or family.upper()
         exif = im.getexif()
         icc_rows = []
         if im.info.get("icc_profile"):
@@ -321,10 +346,9 @@ def _decode_pillow(path: Path, max_side: int | None = None) -> DecodedImage:
     return DecodedImage(frames, durations, fmt, meta, exif_bytes, full_size)
 
 
-def _decode_jxl(path: Path, max_side: int | None = None) -> DecodedImage:
+def _decode_jxl(data: bytes, max_side: int | None = None) -> DecodedImage:
     import imagecodecs
 
-    data = path.read_bytes()
     size = jxl_size(data)
     if size is not None:
         check_pixels(*size)
@@ -368,7 +392,7 @@ def _decode_raw(path: Path, max_side: int | None = None) -> DecodedImage:
     exif_rows: list[MetaItem] = []
     exif_bytes = None
     try:  # Most RAW formats are TIFF-based, so Pillow can usually read their EXIF.
-        with Image.open(path) as tiff:
+        with Image.open(path, formats=("TIFF",)) as tiff:  # TIFF-based RAWs only; never another plugin
             exif = tiff.getexif()
             exif_rows, exif_bytes = exif_items(exif), _exif_bytes(exif)
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
@@ -421,7 +445,7 @@ def open_psd(path: Path):
         raise DecodeError("The Photoshop file is damaged or uses features that Media Reader x cannot read.") from exc
 
 
-def _decode_psd(path: Path, max_side: int | None = None) -> DecodedImage:
+def _decode_psd(path: Path, max_side: int | None = None, psb: bool = False) -> DecodedImage:
     """Show the flattened image Photoshop stores in the file (8, 16 or 32-bit, PSD or PSB).
 
     Layers are not composited here: that needs scipy and scikit-image (about 100 MB), and
@@ -441,14 +465,23 @@ def _decode_psd(path: Path, max_side: int | None = None) -> DecodedImage:
     gc.collect()
     full_size = QSize(*im.size)
     frame = pil_to_qimage(_shrink_pil(im, max_side))
-    fmt = "Photoshop (PSB)" if path.suffix.lower() == ".psb" else "Photoshop (PSD)"
+    fmt = "Photoshop (PSB)" if psb else "Photoshop (PSD)"
     extra = [MetaItem("Image", "Colour mode", f"{_PSD_MODES.get(mode, 'Unknown')}, {depth}-bit"),
              MetaItem("Image", "Layers", str(layers))]
     return DecodedImage([frame], [0], fmt, _image_items(fmt, full_size, 1, extra), full_size=full_size)
 
 
+def load_svg(path: Path) -> QSvgRenderer:
+    """A renderer for ``path`` after the safety check in content.load_svg. Raises DecodeError."""
+    try:
+        data = content.load_svg(path)
+    except content.Refused as exc:
+        raise DecodeError(str(exc)) from exc
+    return QSvgRenderer(QByteArray(data))
+
+
 def _decode_svg(path: Path) -> DecodedImage:
-    renderer = QSvgRenderer(QByteArray(path.read_bytes()))
+    renderer = load_svg(path)
     if not renderer.isValid():
         raise DecodeError("The SVG file is damaged or uses unsupported features.")
     base = renderer.defaultSize()
@@ -487,16 +520,23 @@ def decode(path: str | Path, max_side: int | None = None) -> DecodedImage:
         raise DecodeError("The file is empty.")
 
     try:
+        notice = None
         if kind is MediaKind.RAW:
             result = _decode_raw(path, max_side)
         elif kind is MediaKind.SVG:
             result = _decode_svg(path)
-        elif path.suffix.lower() in PSD_EXTS:
-            result = _decode_psd(path, max_side)
-        elif path.suffix.lower() == ".jxl":
-            result = _decode_jxl(path, max_side)
         else:
-            result = _decode_pillow(path, max_side)
+            # The content picks the decoder, from the families the extension allows plus a notice otherwise.
+            head = content.read_head(path)
+            way = route(path, head)
+            notice = way.notice
+            if way.family == "psd":
+                result = _decode_psd(path, max_side, psb=head[4:6] == b"\x00\x02")
+            elif way.family == "jxl":
+                result = _decode_jxl(path.read_bytes(), max_side)
+            else:
+                result = _decode_pillow(path.read_bytes(), way.family, max_side)
+        result.notice = notice
         # Inside the try: the file can vanish between the pixel decode and this stat.
         result.metadata = file_items(path) + result.metadata
     except DecodeError:

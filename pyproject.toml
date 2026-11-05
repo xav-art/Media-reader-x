@@ -7,7 +7,7 @@ name = "mediareaderx"
 description = "Portable, offline viewer for HEIC, AVIF, JPEG XL, camera RAW and modern video on Windows."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.11"
+requires-python = ">=3.14"
 dynamic = ["version"]
 dependencies = [
     "PySide6-Essentials==6.12.0",
@@ -15,12 +15,15 @@ dependencies = [
     "pillow==13.0.0",
     "pillow-heif==1.8.1",
     "imagecodecs==2026.10.10",
-    "rawpy==0.27.1",
+    "rawpy==0.28.0",
     "numpy==2.5.4",
+    "psd-tools==1.26.0",
+    "attrs==26.1.0",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest==9.1.1", "av==19.0.2", "pyinstaller==6.22.3", "pip-licenses==5.5.5", "cyclonedx-bom==7.5.0"]
+dev = ["pytest==9.1.1", "av==19.0.2", "pyinstaller==6.22.3", "pip-licenses==5.5.5", "cyclonedx-bom==7.5.0",
+       "pip-audit==2.10.1"]
 
 [project.scripts]
 mediareaderx = "mediareaderx.app:main"

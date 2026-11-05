@@ -1,11 +1,13 @@
 """Video player built on Qt Multimedia's bundled FFmpeg backend.
 
-The FFmpeg libraries ship inside PySide6, so HEVC, VP9 and AV1 play without
-the Windows Store codec extensions and without admin rights.
+The FFmpeg libraries ship inside PySide6, so HEVC and VP9 play without the
+Windows Store codec extensions and without admin rights. AV1 plays only when
+the GPU can decode it; ``av1check`` turns a silent AV1 failure into a message.
 """
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QUrl, Signal
@@ -13,8 +15,10 @@ from PySide6.QtMultimedia import QAudioOutput, QMediaMetaData, QMediaPlayer
 from PySide6.QtMultimediaWidgets import QVideoWidget
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMenu, QSlider, QStyle, QToolButton, QVBoxLayout, QWidget
 
-from mediareaderx import icons
+from mediareaderx import av1check, icons
 from mediareaderx.metadata import MetaItem
+
+log = logging.getLogger(__name__)
 
 
 SPEEDS = (0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
@@ -42,6 +46,7 @@ class VideoView(QWidget):
         self.video.setAccessibleName("Video")
         self.player.setVideoOutput(self.video)
         self._force_loop = False
+        self._av1_watch = False  # read by _apply_loops; the rest of the AV1 watch state is set up below
 
         style = self.style()
         self.play_btn = QToolButton(self)
@@ -52,7 +57,7 @@ class VideoView(QWidget):
 
         self.seek = QSlider(Qt.Orientation.Horizontal, self)
         self.seek.setAccessibleName("Playback position")
-        self.seek.sliderMoved.connect(self.player.setPosition)
+        self.seek.sliderMoved.connect(self._user_seek)
         self.time_label = QLabel("0:00 / 0:00", self)
 
         self.mute_btn = QToolButton(self)
@@ -108,10 +113,21 @@ class VideoView(QWidget):
         self.player.mediaStatusChanged.connect(self._on_status)
         self.player.errorOccurred.connect(self._on_error)
 
+        # AV1 watch: armed on LoadedMedia for an AV1 track, ended by the first valid frame (see av1check).
+        self._av1_watch = False
+        self._av1_decided = False  # per file: stop() re-sends LoadedMedia, which must not arm the watch again
+        self._av1_seeked = False  # set by _user_seek: a seek to the end before any frame is not proof
+        self._av1_played = 0
+        self._av1_last_pos = 0
+        self._frame_slot = False
+        self._sink = self.video.videoSink()
+
     # -- public API --------------------------------------------------------------
     def open(self, path: str | Path, autoplay: bool = True, force_loop: bool = False) -> None:
         """Play ``path``. ``force_loop`` (Live Photos) loops regardless of the Loop button."""
         self._force_loop = force_loop
+        self._disarm_av1()  # before setSource: nothing from the previous file may count
+        self._av1_decided = False
         self._apply_loops()
         self.set_rate(1.0)
         self.player.setSource(QUrl.fromLocalFile(str(path)))
@@ -123,7 +139,9 @@ class VideoView(QWidget):
         self.loop_btn.setIcon(icons.icon("loop", color))
 
     def _apply_loops(self) -> None:
-        looping = not self.suppress_loop and (self._force_loop or self.loop_btn.isChecked())
+        # No loop while the AV1 watch runs: a video-only clip without a decoder never moves its position and,
+        # looping, never ends either, so only a single play can reach EndOfMedia and decide.
+        looping = not self.suppress_loop and not self._av1_watch and (self._force_loop or self.loop_btn.isChecked())
         self.player.setLoops(QMediaPlayer.Loops.Infinite if looping else QMediaPlayer.Loops.Once)
 
     @property
@@ -140,6 +158,7 @@ class VideoView(QWidget):
         self.set_rate(SPEEDS[max(0, min(len(SPEEDS) - 1, current + direction))])
 
     def stop(self) -> None:
+        self._disarm_av1()
         self.player.stop()
         self.player.setSource(QUrl())
 
@@ -150,7 +169,12 @@ class VideoView(QWidget):
             self.player.play()
 
     def step(self, ms: int) -> None:
-        self.player.setPosition(max(0, min(self.player.duration(), self.player.position() + ms)))
+        self._user_seek(max(0, min(self.player.duration(), self.player.position() + ms)))
+
+    def _user_seek(self, pos: int) -> None:
+        if self._av1_watch:
+            self._av1_seeked = True  # a seek to the end before any frame is not proof (see _on_status)
+        self.player.setPosition(pos)
 
     def toggle_mute(self) -> None:
         self.mute_btn.toggle()
@@ -177,17 +201,67 @@ class VideoView(QWidget):
         if not self.seek.isSliderDown():
             self.seek.setValue(pos)
         self.time_label.setText(f"{fmt_ms(pos)} / {fmt_ms(self.player.duration())}")
+        if self._av1_watch:
+            # Jumps count as zero time but are not user seeks: without a decoder, a video-only clip's position
+            # jumps straight to its end. Only _user_seek marks a seek.
+            self._av1_played += av1check.played_step(self._av1_last_pos, pos)
+            self._av1_last_pos = pos
+            if av1check.no_picture(self._av1_played, self.player.duration(), ended=False):
+                self._av1_failed()
 
     def _on_state(self, state) -> None:
         playing = state == QMediaPlayer.PlaybackState.PlayingState
         icon = QStyle.StandardPixmap.SP_MediaPause if playing else QStyle.StandardPixmap.SP_MediaPlay
         self.play_btn.setIcon(self.style().standardIcon(icon))
 
+    # -- AV1 watch ---------------------------------------------------------------
+    def _arm_av1(self) -> None:
+        if self._av1_decided:
+            return
+        self._av1_watch = True
+        self._av1_seeked = False
+        self._av1_played = 0
+        self._av1_last_pos = self.player.position()
+        if not self._frame_slot:
+            self._sink.videoFrameChanged.connect(self._on_frame)
+            self._frame_slot = True
+        self._apply_loops()
+
+    def _disarm_av1(self) -> None:
+        self._av1_watch = False
+        if self._frame_slot:  # no Python call per frame once the question is answered
+            self._sink.videoFrameChanged.disconnect(self._on_frame)
+            self._frame_slot = False
+
+    def _on_frame(self, frame) -> None:
+        # Qt sends an empty frame on stop and on a new source: only a real picture proves the decoder works.
+        # A frame of the previous file can still arrive after open() (queued from the render thread). It is
+        # harmless because the new file's LoadedMedia, which arms the watch, comes later: loading is asynchronous.
+        if self._av1_watch and frame.isValid():
+            self._av1_decided = True
+            self._disarm_av1()
+            self._apply_loops()  # the decoder works: Loop and Live Photo looping apply again
+            av1check.mark_available()
+
+    def _av1_failed(self) -> None:
+        played = self._av1_played
+        self._av1_decided = True  # before stop(): its LoadedMedia must not arm the watch again
+        self._disarm_av1()
+        av1check.mark_unavailable()
+        log.warning("AV1 video showed no frame after %d ms of playing", played)
+        self.player.stop()  # keeps the source; no sound behind the message
+        self.failed.emit(av1check.MESSAGE)
+
     def _on_status(self, status) -> None:
         if status == QMediaPlayer.MediaStatus.LoadedMedia:
+            if av1check.is_av1(self.player):
+                self._arm_av1()
             self.metadataReady.emit(self.metadata_items())
         elif status == QMediaPlayer.MediaStatus.EndOfMedia:
-            self.ended.emit()
+            if self._av1_watch and not self._av1_seeked:
+                self._av1_failed()  # instead of ended: the slideshow must not open the next file first
+            else:
+                self.ended.emit()
         elif status == QMediaPlayer.MediaStatus.InvalidMedia:
             self.failed.emit("This video could not be played. The file may be damaged or use an unsupported codec.")
 

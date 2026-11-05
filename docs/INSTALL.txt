@@ -4,6 +4,7 @@ MEDIA READER - INSTALLATION GUIDE
 Media Reader x opens photos and videos that Windows cannot open on its own:
 iPhone photos (HEIC), AVIF, JPEG XL, Photoshop (PSD, PSB), camera RAW (Canon, Nikon, Sony, Fuji...),
 and videos in H.265/HEVC, VP9 and AV1 (MKV, WebM, MOV, MP4).
+AV1 video plays only if your PC has a graphics chip that can decode AV1. If not, the app shows a message.
 
 It works fully offline. Your files never leave your computer.
 You do NOT need admin rights to install it.

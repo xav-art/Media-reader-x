@@ -7,14 +7,15 @@ import os
 import subprocess
 from pathlib import Path
 
-from PySide6.QtCore import (QByteArray, QEvent, QFile, QMimeData, QObject, QPoint, QRunnable, QSettings, QSize,
-                            Qt, QThreadPool, QTimer, QUrl, Signal)
+from PySide6.QtCore import (QByteArray, QCoreApplication, QDeadlineTimer, QEvent, QEventLoop, QFile, QMimeData,
+                            QObject, QPoint, QRunnable, QSettings, QSize, Qt, QThread, QThreadPool, QTimer, QUrl,
+                            Signal)
 from PySide6.QtGui import (QAction, QActionGroup, QBrush, QCloseEvent, QColor, QDragEnterEvent, QDropEvent,
                            QGuiApplication, QImage, QKeySequence, QPalette, QShortcut)
 from PySide6.QtWidgets import (QApplication, QFileDialog, QLabel, QMainWindow, QMessageBox, QStackedWidget,
                                QToolBar)
 
-from mediareaderx import APP_NAME, __version__, icons
+from mediareaderx import APP_NAME, __version__, content, icons
 from mediareaderx.cache import DecodedCache, budget_for_screen, cache_key
 from mediareaderx.config import log_dir, settings_file
 from mediareaderx.decoders import DecodedImage, DecodeError, decode
@@ -91,6 +92,28 @@ class _DecodeTask(QRunnable):
             pass  # the window closed while this file decoded
 
 
+TRASH_WAIT_MS = 2000  # a RAW or PSD decode keeps its file open for up to about 1.5 s
+TRASH_POLL_MS = 50
+
+
+def _move_to_trash(path: Path) -> bool:
+    """Move ``path`` to the Recycle Bin. Never deletes permanently.
+
+    Windows refuses the move while any process has the file open: an antivirus scan of a new file, Explorer's
+    preview, or our own readers (a RAW or PSD decode, a video thumbnail grab, which runs on this thread). So try
+    again for up to 2 s, and keep processing our own events meanwhile so that our readers can finish and close
+    the file. User input waits: the caller shows a busy cursor.
+    """
+    deadline = QDeadlineTimer(TRASH_WAIT_MS)
+    while True:
+        if QFile.moveToTrash(str(path)):
+            return True
+        if not path.exists() or deadline.hasExpired():
+            return False
+        QCoreApplication.processEvents(QEventLoop.ProcessEventsFlag.ExcludeUserInputEvents, TRASH_POLL_MS)
+        QThread.msleep(TRASH_POLL_MS)
+
+
 class MainWindow(QMainWindow):
     PAGE_WELCOME, PAGE_IMAGE, PAGE_VIDEO, PAGE_MESSAGE = range(4)
 
@@ -126,6 +149,8 @@ class MainWindow(QMainWindow):
         self._slide_timer = QTimer(self)
         self._slide_timer.setSingleShot(True)
         self._slide_timer.timeout.connect(self._slideshow_next)
+        self._deleting = False  # set while delete_current waits for a file to close
+        self._close_pending = False  # the user closed the window during that wait
         self._slideshow_entered_fullscreen = False
         self._saved_layout: QByteArray | None = None
         self._saved_window_state = Qt.WindowState.WindowNoState
@@ -523,11 +548,23 @@ class MainWindow(QMainWindow):
             self._show_message(message or f"{APP_NAME} cannot open this image.")
             self._schedule_slide()  # a damaged file must not stop the slideshow
 
-    def _show_video(self, path: Path, force_loop: bool = False) -> None:
+    def _show_video(self, path: Path, force_loop: bool = False) -> bool:
+        """Play ``path`` if its content is a known video container. False (and a message) if not."""
+        try:
+            notice = content.check_video(path)  # FFmpeg only ever sees a known container
+        except content.Refused as exc:
+            log.warning("Video refused: %s", describe_file(path))
+            if force_loop:  # a Live Photo clip: keep showing the photo
+                self.status.setText(str(exc))
+            else:
+                self._show_message(str(exc))
+                self._schedule_slide()
+            return False
         self.stack.setCurrentIndex(self.PAGE_VIDEO)
         self.video_view.open(path, autoplay=True, force_loop=force_loop)
-        self.status.setText("   |   ".join(p for p in (self.nav.position_text, path.name) if p))
+        self.status.setText("   |   ".join(p for p in (self.nav.position_text, path.name, notice) if p))
         self._sync_actions()
+        return True
 
     def _on_decoded(self, token: int, image: DecodedImage) -> None:
         if token != self._token:
@@ -549,6 +586,11 @@ class MainWindow(QMainWindow):
 
     def _on_video_failed(self, message: str) -> None:
         log.warning("Video failed: %s", message)
+        if self.act_live.isChecked():  # a Live Photo clip: back to the photo, as for a refused clip
+            self.act_live.setChecked(False)
+            self.toggle_live_photo(False)
+            self.status.setText(message)
+            return
         self._show_message(message)
         self._schedule_slide()
 
@@ -588,6 +630,8 @@ class MainWindow(QMainWindow):
             parts.append(f"rotated {self.image_view.rotation}°")
         if self.companion:
             parts.append("Live Photo (press L)")
+        if img.notice:
+            parts.append(img.notice)  # e.g. "PNG file named .heic": opened as what it really is
         self.status.setText("   |   ".join(p for p in parts if p))
 
     # -- recent files ----------------------------------------------------------
@@ -693,24 +737,63 @@ class MainWindow(QMainWindow):
     def delete_current(self) -> None:
         """Move the file (and a Live Photo's video) to the Recycle Bin. Never deletes permanently."""
         path, companion = self.current, self.companion
-        if path is None or not path.exists():
+        if path is None or not path.exists() or self._deleting:
             return
         self._token += 1
         self._full_image = self._full_wanted = None
         self.video_view.stop()  # release the file handle before moving it
-        targets = [path] + ([companion] if companion and companion.exists() else [])
-        failed = [p for p in targets if not QFile.moveToTrash(str(p))]
-        if path in failed:
+        for p in (path, companion):
+            if p is not None:
+                self.filmstrip.release(p)  # a video thumbnail grab of this file ends now
+        # _move_to_trash processes events while it waits. Meanwhile no slideshow step, drop or close may open
+        # another file (they check _deleting), and the full-screen idle timer must not stack a cursor on ours.
+        self._deleting = True
+        self._slide_timer.stop()
+        idle_was_active = self._idle_timer.isActive()
+        self._idle_timer.stop()
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            moved = _move_to_trash(path)
+            # The Live Photo clip goes only with its photo, never on its own.
+            companion_left = bool(moved and companion and companion.exists() and not _move_to_trash(companion))
+        finally:
+            QApplication.restoreOverrideCursor()
+            self._deleting = False
+            for p in (path, companion):
+                if p is not None:
+                    self.filmstrip.end_release(p)
+            if idle_was_active:
+                self._idle_timer.start()
+        if self._close_pending:  # honour the close now; no dialog, no new file on a closing window
+            self._close_pending = False
+            if moved:
+                log.info("Moved %s to Recycle Bin", describe_file(path))
+            self.close()
+            return
+        if not moved and path.exists():
             QMessageBox.warning(self, "Move to Recycle Bin", (
                 f"\"{path.name}\" could not be moved to the Recycle Bin, so it was not deleted.\n\n"
                 "Network folders have no Recycle Bin, and the file may be open in another app."))
             self.open_path(path)
             return
-        log.info("Moved %s to Recycle Bin", describe_file(path))
+        if moved:
+            log.info("Moved %s to Recycle Bin", describe_file(path))
+            done = f"Moved {path.name} to the Recycle Bin."
+        else:  # Windows reported a failure, but the file is gone: say so, and do not claim the Recycle Bin has it
+            log.warning("Move to Recycle Bin failed, but the file is gone: %s", describe_file(path))
+            done = f"{path.name} is gone, but Windows did not confirm that it is in the Recycle Bin."
+        if companion_left:
+            log.warning("Live Photo video not moved to Recycle Bin: %s", describe_file(companion))
+            done += f" Its Live Photo video {companion.name} is still in the folder."
         self.filmstrip.invalidate(path)
         self._cache.discard(path)
-        nxt = self.nav.remove_current()
-        self.statusBar().showMessage(f"Moved {path.name} to the Recycle Bin.", 5000)
+        nav = self.nav
+        if 0 <= nav.index < len(nav.files) and nav.files[nav.index] == path:
+            nxt = nav.remove_current()
+        else:  # defensive: the folder position changed during the wait; drop the deleted entry
+            nav.remove(path)
+            nxt = nav.files[nav.index] if nav.files and 0 <= nav.index < len(nav.files) else None
+        self.statusBar().showMessage(done, 8000)
         if nxt is not None:
             self.open_path(nxt)
         else:
@@ -732,7 +815,8 @@ class MainWindow(QMainWindow):
         if not self.companion:
             return
         if checked:
-            self._show_video(self.companion, force_loop=True)
+            if not self._show_video(self.companion, force_loop=True):
+                self.act_live.setChecked(False)
         else:
             self.video_view.stop()
             self.stack.setCurrentIndex(self.PAGE_IMAGE)
@@ -852,11 +936,11 @@ class MainWindow(QMainWindow):
 
     def _schedule_slide(self) -> None:
         """Images and error pages wait the interval; videos advance when they end."""
-        if self.act_slideshow.isChecked() and self.stack.currentIndex() != self.PAGE_VIDEO:
+        if self.act_slideshow.isChecked() and self.stack.currentIndex() != self.PAGE_VIDEO and not self._deleting:
             self._slide_timer.start(self.slideshow_seconds * 1000)
 
     def _on_video_ended(self) -> None:
-        if self.act_slideshow.isChecked():
+        if self.act_slideshow.isChecked() and not self._deleting:
             self._slideshow_next()
 
     def _slideshow_next(self) -> None:
@@ -924,6 +1008,9 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
 
     def dropEvent(self, event: QDropEvent) -> None:
+        if self._deleting:  # OLE drops arrive even while user input waits: never open a file mid-delete
+            event.ignore()
+            return
         urls = [u for u in event.mimeData().urls() if u.isLocalFile()]
         if urls:
             self.open_path(urls[0].toLocalFile())  # a folder opens its first file
@@ -952,6 +1039,10 @@ class MainWindow(QMainWindow):
         self.move(screen.x() + (screen.width() - w) // 2, screen.y() + (screen.height() - h) // 2)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self._deleting:  # a taskbar close during the Recycle Bin wait: delete_current closes when it is done
+            event.ignore()
+            self._close_pending = True
+            return
         QApplication.instance().removeEventFilter(self)
         if self.act_slideshow.isChecked():
             self.toggle_slideshow(False)

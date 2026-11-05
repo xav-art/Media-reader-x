@@ -1,0 +1,49 @@
+{
+  "_comment": "Known vulnerabilities accepted for a limited time. Each entry names the CVE, the package and the exact version it applies to, why it does not affect Media Reader x or why no fix exists yet, and an expiry date. tools/vuln_scan.py fails the build after the expiry date, and an entry stops applying when the package version changes. Every entry was reviewed by an adversarial subagent before it was added.",
+  "exceptions": [
+    {
+      "id": "CVE-2026-111497", "package": "brotli", "version": "1.2.0", "expires": "2027-01-03",
+      "reason": "Brotli decoder overflow. libjxl uses brotli only for brob box decompression and JPEG reconstruction. imagecodecs.jpegxl_decode (the only JPEG XL call in the app) never calls JxlDecoderSetDecompressBoxes, JxlDecoderSetBoxBuffer or JxlDecoderSetJPEGBuffer and subscribes only to BASIC_INFO, FULL_IMAGE and (frame count) FRAME events. Source: imagecodecs v2026.10.10 imagecodecs/_jpegxl.pyx; the static .pyd cannot show this. imagecodecs 2026.10.10 is the newest release."
+    },
+    {
+      "id": "CVE-2021-30473", "package": "libaom", "version": "3.14.1", "expires": "2027-01-03",
+      "reason": "False match: NVD lists the fix as a 2021 snapshot date, which the scanner cannot compare with 3.14.1 (2026). Also, libaom is only the AV1 encoder inside Pillow's AVIF module, which the app never calls (AVIF decodes with dav1d)."
+    },
+    {
+      "id": "CVE-2021-30474", "package": "libaom", "version": "3.14.1", "expires": "2027-01-03",
+      "reason": "False match on a 2021 snapshot date, see CVE-2021-30473. Encoder never called."
+    },
+    {
+      "id": "CVE-2021-30475", "package": "libaom", "version": "3.14.1", "expires": "2027-01-03",
+      "reason": "False match on a 2021 snapshot date, see CVE-2021-30473. Encoder never called."
+    },
+    {
+      "id": "CVE-2026-85091", "package": "zlib", "version": "1.3.2", "expires": "2027-01-03",
+      "reason": "Overflow in gz_vacate() during non-blocking gzwrite(). The app never writes gzip streams: zlib in LibRaw and Qt only inflates. No fixed zlib release exists yet."
+    },
+    {
+      "id": "CVE-2026-115506", "package": "libexpat", "version": "2.9.0", "expires": "2027-01-03",
+      "reason": "Expat in CPython (pyexpat). No file content reaches it: SVG is parsed by Qt's own QXmlStreamReader, and the app never calls Python XML parsers or Pillow getxmp(). No fixed CPython release on Windows yet."
+    },
+    {
+      "id": "CVE-2026-113351", "package": "libexpat", "version": "2.9.0", "expires": "2027-01-03",
+      "reason": "Expat in CPython, not reached by file content (see CVE-2026-115506). Also needs XML_ParserReset reuse, which the app never does."
+    },
+    {
+      "id": "CVE-2026-117610", "package": "libexpat", "version": "2.9.0", "expires": "2027-01-03",
+      "reason": "Expat in CPython, not reached by file content (see CVE-2026-115506). Fixed in expat 2.10.0, which no CPython 3.14 release ships yet."
+    },
+    {
+      "id": "CVE-2026-118370", "package": "libexpat", "version": "2.9.0", "expires": "2027-01-03",
+      "reason": "Expat in CPython, not reached by file content (see CVE-2026-115506). Fixed in expat 2.10.0, which no CPython 3.14 release ships yet."
+    },
+    {
+      "id": "CVE-2026-107696", "package": "ffmpeg", "version": "9.0.1", "expires": "2027-01-03",
+      "reason": "Infinite loop on RTSP redirects. The RTSP demuxer is chosen only for rtsp: URLs, and the app sets QT_FFMPEG_PROTOCOL_WHITELIST=file, so FFmpeg cannot open any network protocol. The container check also refuses playlists (HLS, concat, SDP) that could name a URL. Unfixed through FFmpeg 9.0.2; PySide6 6.12.0 is the newest release."
+    },
+    {
+      "id": "CVE-2026-113679", "package": "harfbuzz", "version": "14.5.0", "expires": "2027-01-03",
+      "reason": "Out-of-bounds write in HarfBuzz's experimental WebAssembly shaper. Qt does not build that shaper: Qt6Gui.dll has no wasm shaper symbols. Fixed in HarfBuzz 15.0.0; waits for a Qt release."
+    }
+  ]
+}

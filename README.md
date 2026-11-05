@@ -5,7 +5,7 @@
   </picture>
 </p>
 
-Media Reader x is a fast, offline Windows viewer for the photo and video formats that Windows cannot open on its own: iPhone HEIC, AVIF, JPEG XL, camera RAW, Photoshop PSD, and HEVC, VP9 and AV1 video. It installs per user, so you need **no admin rights**.
+Media Reader x is a fast, offline Windows viewer for the photo and video formats that Windows cannot open on its own: iPhone HEIC, AVIF, JPEG XL, camera RAW, Photoshop PSD, and HEVC, VP9 and AV1 video (AV1 needs a graphics chip that can decode it). It installs per user, so you need **no admin rights**.
 
 <p align="center">
   <img src="docs/screenshots/dark-heic-metadata.png" alt="A HEIC photo in Media Reader x, with the metadata panel and the thumbnail strip, dark theme" width="100%">
@@ -40,7 +40,7 @@ Media Reader x is a fast, offline Windows viewer for the photo and video formats
 - **Share:** copy the picture to the clipboard, or save a copy as JPG or PNG. The copy keeps EXIF, and you can remove GPS.
 - **Print:** put several pictures on one A4 page with 1, 2, 4, 6 or 9 per page, Fit or Fill, margins, file names and a live preview. Save as PDF is included.
 - **Tidy up:** move a file to the Recycle Bin. A Live Photo's video goes with it.
-- **Video:** speed from 0.25x to 2x, loop, and seek.
+- **Video:** speed from 0.25x to 2x, loop, and seek. To play AV1 video, your PC needs a graphics chip that can decode AV1. If it has none, AV1 video does not play. The Microsoft AV1 Video Extension does not help, because the app does not use the Windows video decoders.
 - **Metadata panel:** file, camera, exposure, GPS, full EXIF, and video codec, bitrate and frame rate.
 - **Safe by design:** rotate only changes the view, and Save a copy refuses to overwrite the original. The app makes no network calls and sends no telemetry. Logs hold the file type and size, never a path or a name.
 
@@ -72,7 +72,8 @@ Prebuilt installers are not published on GitHub yet. To get the app, build it fr
 ## Develop
 
 ```powershell
-python -m venv .venv
+# Python 3.14, installed per user (no admin)
+& "$env:LOCALAPPDATA\Programs\Python\Python314\python.exe" -m venv .venv
 .venv\Scripts\python -m pip install -r requirements-dev.txt
 .venv\Scripts\python -m pip install --no-deps -e .
 .venv\Scripts\python -m pytest            # decoders, export, cache, navigation, GUI, video, slideshow, print
@@ -91,9 +92,9 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 - **No elevation:** the Inno Setup installer uses `PrivilegesRequired=lowest` and installs to `%LOCALAPPDATA%\Programs\Media Reader x`. File types register under HKCU as *Open with* entries plus `RegisteredApplications`, so Windows defaults are never hijacked.
 - **Offline and private:** no network calls and no telemetry. Logs (`%LOCALAPPDATA%\MediaReaderX\logs`, rotating, 5 x 1 MB) record file type and size only, never paths.
-- **Hardened decoding:** 1 GB file cap, 576 MP decompression-bomb limit, and animation frame and memory caps. Decoding runs off the UI thread, and errors give plain-language messages.
-- **Health check:** `MediaReaderX.exe --self-test` round-trips every codec headlessly. The exit code is 0 when everything works.
-- **Supply chain:** fully pinned dependencies, a CycloneDX SBOM, SHA-256 checksums, `THIRD_PARTY_NOTICES.txt`, and no UPX packing (to avoid AV false positives). The build is one-folder, so nothing unpacks into `%TEMP%`.
+- **Hardened decoding:** each file reaches only the one decoder for its content. Videos must be a known container before FFmpeg sees them, and SVG may embed only PNG or JPEG. There's also a 1 GB file cap, a 576 MP decompression-bomb limit, and animation frame and memory caps. Decoding runs off the UI thread, and errors give plain-language messages. See [SECURITY.md](SECURITY.md) for what this covers and what it doesn't.
+- **Health check:** `MediaReaderX.exe --self-test` decodes every codec headlessly and checks the content locks. The exit code is 0 when everything works.
+- **Supply chain:** fully pinned dependencies, a CycloneDX SBOM that also lists the native libraries with CPE ids, a build that stops on High or Critical CVEs (pip-audit and grype), SHA-256 checksums, `THIRD_PARTY_NOTICES.txt`, and no UPX packing (to avoid AV false positives). The build is one-folder, so nothing unpacks into `%TEMP%`.
 - **Not code-signed:** SmartScreen will warn. For a wide rollout, sign `MediaReaderX.exe` and the installer with a company certificate (add `SignTool=` to `packaging/MediaReaderX.iss`).
 - **Report a vulnerability:** see [SECURITY.md](SECURITY.md).
 
@@ -120,7 +121,7 @@ packaging/           PyInstaller spec, Inno Setup script
 tools/               sample/icon/notice/association generators
 ```
 
-Video plays through Qt Multimedia's bundled FFmpeg backend, so HEVC and AV1 work without the paid *HEVC Video Extensions* from the Microsoft Store.
+Video plays through Qt Multimedia's bundled FFmpeg backend, so HEVC works without the paid *HEVC Video Extensions* from the Microsoft Store. AV1 plays only with hardware decoding: this FFmpeg build has FFmpeg's own `av1` decoder, which needs D3D11VA, D3D12VA or DXVA2 on the GPU, and no software AV1 decoder. (dav1d ships for AVIF photos, but FFmpeg does not use it.)
 
 </details>
 

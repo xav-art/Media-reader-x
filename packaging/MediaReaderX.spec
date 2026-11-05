@@ -59,9 +59,13 @@ a.binaries = [b for b in a.binaries
 # - OpenSSL: the app makes no network calls (hashlib falls back to its built-in hashes).
 # - Qt plugins for other backends: direct2d, TLS, Windows Media. Keep qoffscreen: --self-test runs on it
 #   (dropping it made the frozen self-test abort with 0xC0000409).
+# - Qt image plugins nothing loads (1.5.0): the app decodes pictures itself, and SVG may embed only PNG
+#   (built into Qt6Gui) or JPEG (qjpeg). Keep qico for the window icon and qsvg for icons.
 _drop = ("opengl32sw.dll", "qtvirtualkeyboardplugin", "Qt6Quick", "Qt6Qml", "Qt6OpenGL.dll", "Qt6VirtualKeyboard",
          "libcrypto-3", "libssl-3", "_ssl.pyd", "_hashlib.pyd", "qdirect2d", "qschannelbackend",
-         "qopensslbackend", "qcertonlybackend", "windowsmediaplugin")
+         "qopensslbackend", "qcertonlybackend", "windowsmediaplugin",
+         "imageformats/qgif", "imageformats/qicns", "imageformats/qtga", "imageformats/qtiff",
+         "imageformats/qwbmp", "imageformats/qwebp")
 a.binaries = [b for b in a.binaries if not any(d.lower() in b[0].replace("\\", "/").lower() for d in _drop)]
 
 pyz = PYZ(a.pure)

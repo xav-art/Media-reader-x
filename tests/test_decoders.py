@@ -48,8 +48,15 @@ def test_16bit_png_is_normalised(tmp_path, qapp):
 
 def test_damaged_file_gives_friendly_error(tmp_path, qapp):
     path = tmp_path / "broken.heic"
-    path.write_bytes(b"this is not an image" * 10)
+    path.write_bytes(bytes(range(7, 250)) * 4)  # binary content of no known format
     with pytest.raises(DecodeError, match="damaged"):
+        decode(path)
+
+
+def test_text_named_as_image_says_what_it_is(tmp_path, qapp):
+    path = tmp_path / "notes.heic"
+    path.write_bytes(b"this is not an image" * 10)
+    with pytest.raises(DecodeError, match="contains a text file, not a picture"):
         decode(path)
 
 
