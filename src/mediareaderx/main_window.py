@@ -15,15 +15,16 @@ from PySide6.QtGui import (QAction, QActionGroup, QBrush, QCloseEvent, QColor, Q
 from PySide6.QtWidgets import (QApplication, QFileDialog, QLabel, QMainWindow, QMessageBox, QStackedWidget,
                                QToolBar)
 
-from mediareaderx import APP_NAME, __version__, content, icons
+from mediareaderx import APP_NAME, __version__, content, icons, recycle, sandbox, ui_text
 from mediareaderx.cache import DecodedCache, budget_for_screen, cache_key
 from mediareaderx.config import log_dir, settings_file
-from mediareaderx.decoders import DecodedImage, DecodeError, decode
+from mediareaderx.decoders import DecodedImage, DecodeError
 from mediareaderx.export import ExportError, export_image
 from mediareaderx.folder import FolderNav, list_media
 from mediareaderx.formats import IMAGE_EXTS, RAW_EXTS, SVG_EXTS, VIDEO_EXTS, MediaKind, dialog_filter, kind_of
 from mediareaderx.logging_setup import describe_file
 from mediareaderx.metadata import file_items
+from mediareaderx.sandbox import decode  # decoders run in protected helpers
 from mediareaderx.theme import THEMES, apply_theme
 from mediareaderx.widgets.filmstrip import Filmstrip
 from mediareaderx.widgets.image_view import ImageView
@@ -44,6 +45,11 @@ SLIDESHOW_SECONDS = (3, 5, 10)
 PRIORITY_CURRENT, PRIORITY_PRELOAD = 10, 0
 NO_PRELOAD_EXTS = frozenset({".gif", ".apng"})  # animations can be hundreds of MB: decode only on demand
 FALLBACK_SCREEN_SIDE = 2560
+
+
+_SANDBOX_TEXT = {"on": "on (decoders run in locked-down helper processes)",
+                 "fallback": "not available on this PC", "failed": "could not start (files do not open)",
+                 "off": "off", "new": "starting"}
 
 
 def _printable(path: Path) -> bool:
@@ -122,6 +128,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle(APP_NAME)
         self.setAcceptDrops(True)
         self.settings = QSettings(str(settings_file()), QSettings.Format.IniFormat)
+        # Fail closed once protected decoding has worked on this PC (see sandbox.py).
+        sandbox.configure(worked_before=self.settings.value("sandbox/worked", False, type=bool))
+        sandbox.notifier.stateChanged.connect(self._on_sandbox_state)
         self.theme = apply_theme(str(self.settings.value("theme", "system")))
         self._applying_theme = False
         self._icon_actions: dict[str, QAction] = {}
@@ -177,6 +186,7 @@ class MainWindow(QMainWindow):
         # that would cover a child widget (review R18, confirmed in the packaged app).
         self.overlay = QLabel(self, Qt.WindowType.Tool | Qt.WindowType.FramelessWindowHint
                               | Qt.WindowType.WindowDoesNotAcceptFocus)
+        ui_text.plain(self.overlay)
         self.overlay.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.overlay.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.overlay.setStyleSheet("background: rgba(12, 17, 32, 200); color: white; padding: 8px 12px;"
@@ -192,6 +202,7 @@ class MainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.filmstrip)
         self.filmstrip.fileActivated.connect(self.open_path)
         self.status = QLabel(self)
+        ui_text.plain(self.status)
         self.statusBar().addWidget(self.status, 1)
 
         self.image_view.zoomChanged.connect(lambda _z: self._update_status())
@@ -208,6 +219,7 @@ class MainWindow(QMainWindow):
     # -- UI construction -----------------------------------------------------
     def _message_label(self, text: str) -> QLabel:
         label = QLabel(text, self)
+        ui_text.plain(label)
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setWordWrap(True)
         label.setMargin(32)
@@ -230,7 +242,7 @@ class MainWindow(QMainWindow):
         """Toolbar buttons are icon-only, so the tooltip carries the name and the key."""
         label = act.text().replace("&", "").removesuffix("...")
         key = act.shortcut().toString(QKeySequence.SequenceFormat.NativeText)
-        act.setToolTip(f"{label} ({key})" if key else label)
+        act.setToolTip(f"{label} ({key})" if key else label)  # static text: labels and keys from this file
 
     def changeEvent(self, event) -> None:
         # Windows applies a colour scheme asynchronously, so re-tint on every palette change.
@@ -443,7 +455,7 @@ class MainWindow(QMainWindow):
         self.act_live.setChecked(False)
         self.current, self.companion, self._current_image = path, None, None
         self._full_image = self._full_wanted = None  # full resolution is for the open photo only
-        if self.settings.value("last_dir") != str(path.parent):  # each write rewrites settings.ini
+        if self._remember_recent() and self.settings.value("last_dir") != str(path.parent):  # rewrites settings.ini
             self.settings.setValue("last_dir", str(path.parent))
         self.setWindowTitle(f"{path.name} - {APP_NAME}")
 
@@ -497,9 +509,9 @@ class MainWindow(QMainWindow):
                 QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
                 try:
                     self._full_image = decode(self.current)
-                except DecodeError as exc:
+                except (DecodeError, MemoryError) as exc:
                     log.warning("Full-resolution decode failed: %s", exc)
-                    QMessageBox.warning(self, APP_NAME, str(exc))
+                    QMessageBox.warning(self, APP_NAME, ui_text.box_text(str(exc)))
                     return None
                 finally:
                     QApplication.restoreOverrideCursor()
@@ -548,11 +560,24 @@ class MainWindow(QMainWindow):
             self._show_message(message or f"{APP_NAME} cannot open this image.")
             self._schedule_slide()  # a damaged file must not stop the slideshow
 
+    def _on_sandbox_state(self, state: str) -> None:
+        if state == "on":
+            if not self.settings.value("sandbox/worked", False, type=bool):
+                self.settings.setValue("sandbox/worked", True)
+        elif state == "fallback":
+            self.statusBar().showMessage(sandbox.FALLBACK_NOTICE, 15000)
+
     def _show_video(self, path: Path, force_loop: bool = False) -> bool:
-        """Play ``path`` if its content is a known video container. False (and a message) if not."""
+        """Play ``path`` if its content is a known container with allowed codecs. False (and a message) if not."""
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            notice = content.check_video(path)  # FFmpeg only ever sees a known container
-        except content.Refused as exc:
+            # A fresh protected helper reads the codec list first: FFmpeg here only sees what passed.
+            notice = sandbox.check_video(path)
+        except Exception as exc:  # Refused, or anything unexpected: never leave the wait cursor on
+            QApplication.restoreOverrideCursor()
+            if not isinstance(exc, content.Refused):
+                log.exception("Video check failed")
+                exc = content.Refused(f"{APP_NAME} cannot check this video. To see why, select Help > Open log folder.")
             log.warning("Video refused: %s", describe_file(path))
             if force_loop:  # a Live Photo clip: keep showing the photo
                 self.status.setText(str(exc))
@@ -560,6 +585,7 @@ class MainWindow(QMainWindow):
                 self._show_message(str(exc))
                 self._schedule_slide()
             return False
+        QApplication.restoreOverrideCursor()
         self.stack.setCurrentIndex(self.PAGE_VIDEO)
         self.video_view.open(path, autoplay=True, force_loop=force_loop)
         self.status.setText("   |   ".join(p for p in (self.nav.position_text, path.name, notice) if p))
@@ -639,7 +665,20 @@ class MainWindow(QMainWindow):
         value = self.settings.value("recent", [])
         return [value] if isinstance(value, str) else list(value or [])
 
+    def _remember_recent(self) -> bool:
+        return self.settings.value("remember_recent", True, type=bool)
+
+    def _set_remember_recent(self, on: bool) -> None:
+        """Off: forget the recent files and the last folder now, and store no paths from here on."""
+        self.settings.setValue("remember_recent", on)
+        if not on:
+            self.settings.setValue("recent", [])
+            self.settings.remove("last_dir")
+            self.welcome.set_recent([])
+
     def _add_recent(self, path: Path) -> None:
+        if not self._remember_recent():
+            return
         key = str(path)
         items = [p for p in self._recent() if p.casefold() != key.casefold()]
         self.settings.setValue("recent", [key, *items][:MAX_RECENT])
@@ -649,13 +688,16 @@ class MainWindow(QMainWindow):
         items = self._recent()
         for i, item in enumerate(items, 1):
             act = self.recent_menu.addAction(f"&{i % 10}  {Path(item).name}", lambda p=item: self.open_path(p))
-            act.setToolTip(item)
+            act.setToolTip(ui_text.tooltip(item))
             act.setStatusTip(item)
         if not items:
             self.recent_menu.addAction("No recent files").setEnabled(False)
         else:
             self.recent_menu.addSeparator()
             self.recent_menu.addAction("Clear list", lambda: self.settings.setValue("recent", []))
+        remember = self.recent_menu.addAction("Remember recent files and folders", self._set_remember_recent)
+        remember.setCheckable(True)
+        remember.setChecked(self._remember_recent())
 
     # -- commands ------------------------------------------------------------
     def _rotate(self, degrees: int) -> None:
@@ -703,7 +745,7 @@ class MainWindow(QMainWindow):
                          strip_gps=self.act_strip_gps.isChecked())
         except ExportError as exc:
             QApplication.restoreOverrideCursor()
-            QMessageBox.warning(self, "Save a copy", str(exc))
+            QMessageBox.warning(self, "Save a copy", ui_text.box_text(str(exc)))
             return
         QApplication.restoreOverrideCursor()
         log.info("Saved copy as %s", describe_file(dest))
@@ -739,6 +781,11 @@ class MainWindow(QMainWindow):
         path, companion = self.current, self.companion
         if path is None or not path.exists() or self._deleting:
             return
+        # Where Windows cannot recycle, Qt's move deletes permanently, without a prompt: refuse up front.
+        if (reason := recycle.refusal(path)) is not None:
+            log.info("Delete refused: no Recycle Bin for %s", describe_file(path))
+            QMessageBox.information(self, "Move to Recycle Bin", ui_text.box_text(reason))
+            return
         self._token += 1
         self._full_image = self._full_wanted = None
         self.video_view.stop()  # release the file handle before moving it
@@ -771,9 +818,9 @@ class MainWindow(QMainWindow):
             self.close()
             return
         if not moved and path.exists():
-            QMessageBox.warning(self, "Move to Recycle Bin", (
+            QMessageBox.warning(self, "Move to Recycle Bin", ui_text.box_text(
                 f"\"{path.name}\" could not be moved to the Recycle Bin, so it was not deleted.\n\n"
-                "Network folders have no Recycle Bin, and the file may be open in another app."))
+                "The file may be open in another app."))
             self.open_path(path)
             return
         if moved:
@@ -978,16 +1025,17 @@ class MainWindow(QMainWindow):
         def join(exts):
             return ", ".join(e.lstrip(".").upper() for e in sorted(exts))
 
-        QMessageBox.information(self, "Supported formats", (
+        QMessageBox.information(self, "Supported formats", ui_text.box_text(
             f"Images: {join(IMAGE_EXTS)}\n\nVector: {join(SVG_EXTS)}\n\n"
             f"Camera RAW: {join(RAW_EXTS)}\n\nVideo: {join(VIDEO_EXTS)}\n"
-            "(H.265/HEVC, H.264, VP9, AV1, ProRes, MPEG-4 and more)"))
+            "(H.265/HEVC, H.264, VP9, AV1, MPEG-4 and other common formats)"))
 
     def show_about(self) -> None:
         QMessageBox.about(self, f"About {APP_NAME}", (
             f"<b>{APP_NAME}</b> {__version__}<br><br>"
             "Offline viewer for HEIC, AVIF, JPEG XL, camera RAW and modern video.<br>"
-            "No telemetry. Files never leave this computer.<br><br>"
+            "No telemetry. Files never leave this computer.<br>"
+            f"Protected decoding: {_SANDBOX_TEXT.get(sandbox.state(), 'starting')}.<br><br>"
             "Built with Qt (LGPL), Pillow, libheif, libjxl, LibRaw and FFmpeg.<br>"
             "See THIRD_PARTY_NOTICES.txt in the install folder.<br><br>"
             "<a href='https://github.com/xav-art/Media-reader-x'>github.com/xav-art/Media-reader-x</a>"))
@@ -1028,7 +1076,8 @@ class MainWindow(QMainWindow):
                                                           Qt.Orientation.Horizontal))
         self.video_view.volume_percent = self._int_setting("volume", 80)
         self.video_view.loop_btn.setChecked(self.settings.value("video_loop", False, type=bool))
-        self.act_strip_gps.setChecked(self.settings.value("strip_gps", False, type=bool))
+        # On by default (privacy by default): a shared copy does not reveal where the photo was taken.
+        self.act_strip_gps.setChecked(self.settings.value("strip_gps", True, type=bool))
 
     def _fit_to_screen(self) -> None:
         """First start: 1200 x 820, but never larger than 90% of the screen (small laptops, 150% scaling)."""

@@ -13,11 +13,11 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox, 
                                QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMessageBox, QProgressDialog,
                                QPushButton, QSpinBox, QToolButton, QVBoxLayout, QWidget)
 
-from mediareaderx import APP_NAME
+from mediareaderx import APP_NAME, ui_text
 from mediareaderx.logging_setup import describe_file
 from mediareaderx.printing import (MAX_MARGIN_MM, PDF_DPI, PER_PAGE, PAPER, Cell, PrintOptions, page_count,
                                    paginate, paper_mm, per_page_for, prepare_device, render_document, render_page)
-from mediareaderx.thumbnails import make_thumbnail
+from mediareaderx.sandbox import make_thumbnail  # protected helpers
 
 log = logging.getLogger(__name__)
 
@@ -151,7 +151,7 @@ class PrintDialog(QDialog):
             item.setData(PATH_ROLE, str(path))
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if path in checked else Qt.CheckState.Unchecked)
-            item.setToolTip(str(path))
+            item.setToolTip(ui_text.tooltip(str(path)))
             self.list.addItem(item)
         self.list.itemChanged.connect(lambda _it: self._on_selection_changed())
         select_all = QPushButton("Select all", self)
@@ -159,7 +159,9 @@ class PrintDialog(QDialog):
         clear_all = QPushButton("Clear all", self)
         clear_all.clicked.connect(lambda: self._check_all(False))
         left = QVBoxLayout()
-        left.addWidget(QLabel("Pictures", self))
+        pictures = QLabel("Pictures", self)
+        ui_text.plain(pictures)
+        left.addWidget(pictures)
         left.addWidget(self.list, 1)
         buttons = QHBoxLayout()
         buttons.addWidget(select_all)
@@ -179,6 +181,7 @@ class PrintDialog(QDialog):
         self.next_btn.setAccessibleName("Next page")
         self.next_btn.clicked.connect(lambda: self._step_page(1))
         self.page_label = QLabel(self)
+        ui_text.plain(self.page_label)
         self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         nav = QHBoxLayout()
         nav.addStretch(1)
@@ -213,6 +216,7 @@ class PrintDialog(QDialog):
         self.rotation_box.setChecked(options.use_rotation)
         self.rotation_box.setVisible(bool(self.rotations))  # only when a picture is rotated in the viewer
         self.summary = QLabel(self)
+        ui_text.plain(self.summary)
         self.summary.setWordWrap(True)
         form = QFormLayout()
         form.addRow("Layout", self.layout_box)
@@ -366,12 +370,13 @@ class PrintDialog(QDialog):
     def _report_failed(self, title: str, failed: list[str]) -> None:
         if failed:
             names = "\n".join(failed[:10]) + (f"\n...and {len(failed) - 10} more" if len(failed) > 10 else "")
-            QMessageBox.warning(self, title, f"{APP_NAME} cannot print these files. Their places on the page "
-                                             f"are empty.\n\n{names}")
+            QMessageBox.warning(self, title, ui_text.box_text(f"{APP_NAME} cannot print these files. Their places "
+                                                             f"on the page are empty.\n\n{names}"))
 
     def _confirm_replace(self, dest: Path) -> bool:
         box = QMessageBox(QMessageBox.Icon.Question, "Save as PDF", f"\"{dest.name}\" already exists. Replace it?",
                           QMessageBox.StandardButton.Cancel, self)
+        box.setTextFormat(Qt.TextFormat.PlainText)
         replace = box.addButton("Replace", QMessageBox.ButtonRole.AcceptRole)
         box.setDefaultButton(QMessageBox.StandardButton.Cancel)
         box.exec()
@@ -443,7 +448,8 @@ class PrintDialog(QDialog):
         except OSError as exc:
             tmp.unlink(missing_ok=True)
             log.warning("Save as PDF failed: %s", exc.strerror)
-            QMessageBox.warning(self, "Save as PDF", f"{APP_NAME} did not save the PDF. {exc.strerror or exc}")
+            QMessageBox.warning(self, "Save as PDF", ui_text.box_text(f"{APP_NAME} did not save the PDF. "
+                                                                      f"{exc.strerror or exc}"))
             return
         if finished:
             log.info("Saved PDF %s", describe_file(dest))

@@ -16,7 +16,7 @@ from mediareaderx.main_window import MainWindow, screen_side
 from mediareaderx.widgets.image_view import ImageView
 
 
-def wait_until(predicate, timeout_ms=8000):
+def wait_until(predicate, timeout_ms=20000):  # protected helpers may need to start first
     timer = QElapsedTimer()
     timer.start()
     while not predicate():

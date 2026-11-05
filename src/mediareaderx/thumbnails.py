@@ -8,9 +8,12 @@ hidden QMediaPlayer on the UI thread, one at a time.
 from __future__ import annotations
 
 import gc
+import io
 import logging
+import os
 from collections import deque
 from pathlib import Path
+from typing import BinaryIO
 
 from PIL import ExifTags, Image, ImageOps
 from PySide6.QtCore import QObject, QSize, Qt, QTimer, QUrl, Signal
@@ -20,7 +23,7 @@ from PySide6.QtMultimedia import QMediaPlayer, QVideoSink
 from mediareaderx import av1check, config, content
 from mediareaderx.decoders import (EXIF_TRANSPOSE, JPEG_FORMATS, JXL_THREADS, ORIENTATION_TAG, check_pixels, jxl_size,
                                    load_svg, ndarray_to_qimage, open_pillow, open_psd, pil_to_qimage,
-                                   register_plugins, route)
+                                   register_plugins, route_ext)
 from mediareaderx.formats import MediaKind, kind_of
 
 log = logging.getLogger(__name__)
@@ -43,10 +46,10 @@ def _pil_thumb(im: Image.Image, side: int) -> QImage:
     return pil_to_qimage(im)
 
 
-def _raw_thumb(path: Path, side: int) -> QImage | None:
+def _raw_thumb(data: bytes, side: int) -> QImage | None:
     import rawpy
 
-    with rawpy.imread(str(path)) as raw:  # LibRaw is much slower from a memory buffer
+    with rawpy.imread(io.BytesIO(data)) as raw:  # from memory: as fast as from the path with rawpy 0.28
         try:
             thumb = raw.extract_thumb()
         except (rawpy.LibRawNoThumbnailError, rawpy.LibRawUnsupportedThumbnailError):
@@ -56,19 +59,27 @@ def _raw_thumb(path: Path, side: int) -> QImage | None:
                 return _pil_thumb(im, side)
         if thumb is not None and thumb.format == rawpy.ThumbFormat.BITMAP:
             return _fit(ndarray_to_qimage(thumb.data), side)
+        check_pixels(raw.sizes.width, raw.sizes.height)
         return _fit(ndarray_to_qimage(raw.postprocess(half_size=True, output_bps=8)), side)
 
 
 def _exif_thumbnail(path: Path, side: int) -> QImage | None:
+    """``_exif_thumbnail_head`` for a file."""
+    try:
+        with path.open("rb") as f:
+            return _exif_thumbnail_head(f.read(EXIF_HEAD_BYTES), side)
+    except OSError:
+        return None
+
+
+def _exif_thumbnail_head(head: bytes, side: int) -> QImage | None:
     """The preview a camera or phone stores in the JPEG's EXIF block, if it is at least ``side``.
 
-    EXIF sits at the start of the file, so this reads 128 KB instead of the whole photo and
+    EXIF sits at the start of the file, so this needs 128 KB instead of the whole photo and
     decodes a 320 px JPEG instead of a 48 MP one (review: 408 ms -> a few ms per tile).
     Small 160 px previews are skipped: enlarged, they look soft in the strip.
     """
     try:
-        with path.open("rb") as f:
-            head = f.read(EXIF_HEAD_BYTES)
         with open_pillow(head, "jpeg") as im:
             if im.format not in JPEG_FORMATS:
                 return None
@@ -87,6 +98,7 @@ def _exif_thumbnail(path: Path, side: int) -> QImage | None:
         if content.sniff(data[:16]) is not content.FAMILIES["jpeg"]:
             return None  # EXIF also allows an uncompressed TIFF preview: the caller decodes the photo instead
         with open_pillow(data, "jpeg") as thumb:
+            check_pixels(*thumb.size)
             if max(thumb.size) < side:
                 return None
             thumb.load()
@@ -94,14 +106,14 @@ def _exif_thumbnail(path: Path, side: int) -> QImage | None:
             turn = EXIF_TRANSPOSE.get(exif.get(ORIENTATION_TAG, 1))
             return _pil_thumb(thumb.transpose(turn) if turn is not None else thumb, side)
     except Exception:  # no usable preview: the caller decodes the photo itself
-        log.debug("No EXIF preview for %s", path.suffix, exc_info=True)
+        log.debug("No EXIF preview", exc_info=True)
         return None
 
 
-def _psd_thumb(path: Path, side: int) -> QImage | None:
+def _psd_thumb(data: bytes, side: int) -> QImage | None:
     """Photoshop's own preview (up to 160 px) when present: sharp at the strip's 112 px tile, and
     it spares flattening a document that can be hundreds of MB. Else the flattened image."""
-    psd, _header = open_psd(path)
+    psd, _header = open_psd(data)
     preview = psd.thumbnail()
     if preview is None or max(preview.size) < PSD_PREVIEW_MIN:
         preview = psd.topil() if psd.has_preview() else None
@@ -110,46 +122,65 @@ def _psd_thumb(path: Path, side: int) -> QImage | None:
     return _pil_thumb(preview, side) if preview is not None else None
 
 
-def make_thumbnail(path: str | Path, side: int = THUMB_SIDE) -> QImage | None:
-    """Return a preview no larger than ``side`` px, or None if it can't be made."""
+def thumbnail_from(f: BinaryIO, size: int, ext: str, side: int = THUMB_SIDE) -> QImage | None:
+    """A preview no larger than ``side`` px of the open file ``f`` (``size`` bytes, named ``*{ext}``), or None.
+
+    Reads 128 KB first: a JPEG's EXIF preview needs no more. Needs no path, so the protected helper
+    (sandbox.py) runs it on a handle it was given.
+    """
     register_plugins()
-    path = Path(path)
-    kind = kind_of(path)
+    kind = kind_of(Path("file" + ext))
     try:
-        if path.stat().st_size > config.MAX_IMAGE_FILE_BYTES or kind in (None, MediaKind.VIDEO):
+        if size > config.MAX_IMAGE_FILE_BYTES or size == 0 or kind in (None, MediaKind.VIDEO):
             return None
+        head = f.read(EXIF_HEAD_BYTES)
+
+        def whole() -> bytes:
+            return head + f.read(max(0, size - len(head)))  # exactly the rest: never a 1 GB buffer
+
         if kind is MediaKind.RAW:
-            return _raw_thumb(path, side)
+            return _raw_thumb(whole(), side)
         if kind is MediaKind.SVG:
-            renderer = load_svg(path)  # from checked bytes: never resolves links next to the file
+            renderer = load_svg(whole())  # from checked bytes: never resolves links
             if not renderer.isValid():
                 return None
-            size = renderer.defaultSize().scaled(side, side, Qt.AspectRatioMode.KeepAspectRatio)
-            img = QImage(size if not size.isEmpty() else QSize(side, side), QImage.Format.Format_ARGB32_Premultiplied)
+            box = renderer.defaultSize().scaled(side, side, Qt.AspectRatioMode.KeepAspectRatio)
+            img = QImage(box if not box.isEmpty() else QSize(side, side), QImage.Format.Format_ARGB32_Premultiplied)
             img.fill(Qt.GlobalColor.transparent)
             painter = QPainter(img)
             renderer.render(painter)
             painter.end()
             return img
-        way = route(path, content.read_head(path))  # the same single decoder as the viewer
+        way = route_ext(ext, head[:content.HEAD_BYTES])  # the same single decoder as the viewer
         if way.family == "jxl":
             import imagecodecs
 
-            data = path.read_bytes()
-            size = jxl_size(data)
-            if size is not None:
-                check_pixels(*size)
-            arr = imagecodecs.jpegxl_decode(data, numthreads=JXL_THREADS)
+            data = whole()
+            dims = jxl_size(data)
+            if dims is None:
+                return None  # no readable size: never decode blind
+            check_pixels(*dims)
+            arr = imagecodecs.jpegxl_decode(data, index=0, numthreads=JXL_THREADS)  # first frame only
             return _fit(ndarray_to_qimage(arr[0] if arr.ndim == 4 else arr), side)
         if way.family == "psd":
-            return _psd_thumb(path, side)
-        if way.family == "jpeg" and (embedded := _exif_thumbnail(path, side)) is not None:
+            return _psd_thumb(whole(), side)
+        if way.family == "jpeg" and (embedded := _exif_thumbnail_head(head, side)) is not None:
             return embedded
-        with open_pillow(path.read_bytes(), way.family) as im:
+        with open_pillow(whole(), way.family) as im:
             check_pixels(*im.size)
             return _pil_thumb(im, side)
     except Exception:  # a bad file must never break the strip
-        log.debug("Thumbnail failed for %s", path.suffix, exc_info=True)
+        log.debug("Thumbnail failed for %s", ext.lower()[:8], exc_info=True)
+        return None
+
+
+def make_thumbnail(path: str | Path, side: int = THUMB_SIDE) -> QImage | None:
+    """Return a preview no larger than ``side`` px, or None if it can't be made (in this process)."""
+    path = Path(path)
+    try:
+        with path.open("rb") as f:
+            return thumbnail_from(f, os.fstat(f.fileno()).st_size, path.suffix, side)
+    except OSError:
         return None
 
 

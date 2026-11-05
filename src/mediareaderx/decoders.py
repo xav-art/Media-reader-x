@@ -127,12 +127,17 @@ def open_pillow(data: bytes, family: str) -> Image.Image:
         raise DecodeError("The image is too large to open safely.") from exc
 
 
-def route(path: Path, head: bytes) -> content.Route:
-    """The content family to decode ``path`` with. Raises DecodeError for content the app does not open."""
+def route_ext(ext: str, head: bytes) -> content.Route:
+    """The content family to decode a file named ``*{ext}`` with. Raises DecodeError for content the app
+    does not open."""
     try:
-        return content.route_image(path.suffix, head)
+        return content.route_image(ext, head)
     except content.Refused as exc:
         raise DecodeError(str(exc)) from exc
+
+
+def route(path: Path, head: bytes) -> content.Route:
+    return route_ext(path.suffix, head)
 
 
 def warm_up() -> None:
@@ -187,32 +192,36 @@ def check_pixels(width: int, height: int) -> None:
         raise DecodeError(f"The image is too large to open safely ({width} x {height} pixels).")
 
 
+JXL_HEADER_BYTES = 16  # signature (2 bytes) + SizeHeader (at most 14 bytes)
+
+
 def jxl_size(data: bytes) -> tuple[int, int] | None:
-    """Read width and height from a JPEG XL header without decoding (spec SizeHeader)."""
+    """Read width and height from a JPEG XL header without decoding (spec SizeHeader). None if unreadable."""
     if data[:2] == b"\xff\x0a":
         code = data
     elif data[:12] == b"\x00\x00\x00\x0cJXL \x0d\x0a\x87\x0a":
-        code, pos = None, 12
-        while pos + 8 <= len(data):  # ISO-BMFF boxes: find the codestream (jxlc or the first jxlp)
+        # ISO-BMFF boxes: the codestream is one jxlc box, or split over jxlp boxes that libjxl joins in order.
+        # Join the jxlp parts until the size header is complete: a first part of two bytes must not hide it.
+        code, pos = b"", 12
+        while pos + 8 <= len(data) and len(code) < JXL_HEADER_BYTES:
             size, kind = int.from_bytes(data[pos:pos + 4], "big"), data[pos + 4:pos + 8]
             header = 8
             if size == 1:
                 size, header = int.from_bytes(data[pos + 8:pos + 16], "big"), 16
             elif size == 0:
                 size = len(data) - pos
-            if kind == b"jxlc":
-                code = data[pos + header:pos + size]
-                break
-            if kind == b"jxlp":
-                code = data[pos + header + 4:pos + size]
-                break
             if size < header:
                 return None
+            if kind == b"jxlc":
+                code += data[pos + header:pos + size]
+                break
+            if kind == b"jxlp":
+                code += data[pos + header + 4:pos + size]  # skip the 4-byte part index
             pos += size
-        if code is None or code[:2] != b"\xff\x0a":
-            return None
     else:
         return None
+    if len(code) < JXL_HEADER_BYTES or code[:2] != b"\xff\x0a":
+        return None  # too short to hold the size header: the caller refuses the file
     bits = int.from_bytes(code[2:16], "little")
     pos = 0
 
@@ -318,6 +327,7 @@ def _decode_pillow(data: bytes, family: str, max_side: int | None = None) -> Dec
         for i in range(min(n_frames, config.MAX_ANIMATION_FRAMES)):
             if i:
                 im.seek(i)
+                check_pixels(*im.size)  # each page or frame has its own size (multi-page TIFF)
             # Stills shrink to the screen and honour EXIF orientation, both in place (no extra
             # full-size copy); animation frames are composited copies at full size.
             if n_frames == 1:
@@ -347,40 +357,40 @@ def _decode_pillow(data: bytes, family: str, max_side: int | None = None) -> Dec
 
 
 def _decode_jxl(data: bytes, max_side: int | None = None) -> DecodedImage:
+    """The first frame of a JPEG XL file. libjxl would decode every frame of an animation at once, before any
+    memory cap could apply, so animations show their first picture (they are very rare)."""
     import imagecodecs
 
     size = jxl_size(data)
-    if size is not None:
-        check_pixels(*size)
+    if size is None:  # without a readable size, the pixel limit cannot be checked: never decode blind
+        raise DecodeError("The JPEG XL file is damaged or unsupported.")
+    check_pixels(*size)
     try:
-        arr = imagecodecs.jpegxl_decode(data, numthreads=JXL_THREADS)
+        arr = imagecodecs.jpegxl_decode(data, index=0, numthreads=JXL_THREADS)
     except Exception as exc:  # imagecodecs raises its own error hierarchy
         raise DecodeError("The JPEG XL file is damaged or unsupported.") from exc
-    # Animated JXL decodes to (frames, h, w, c); stills to (h, w[, c]).
-    stack = list(arr[: config.MAX_ANIMATION_FRAMES]) if arr.ndim == 4 else [arr]
-    if len(stack) > 1:
-        frames = [ndarray_to_qimage(a) for a in stack]
-        return DecodedImage(frames, [100] * len(frames), "JPEG XL",
-                            _image_items("JPEG XL", frames[0].size(), len(frames)))
-    full_size = QSize(stack[0].shape[1], stack[0].shape[0])
-    frame = ndarray_to_qimage(stack[0], max_side)
-    del arr, stack  # free the full-size pixels before the caller sees the result
+    if arr.ndim == 4:  # some builds return a stack of one frame
+        arr = arr[0]
+    full_size = QSize(arr.shape[1], arr.shape[0])
+    frame = ndarray_to_qimage(arr, max_side)
+    del arr  # free the full-size pixels before the caller sees the result
     return DecodedImage([frame], [100], "JPEG XL", _image_items("JPEG XL", full_size, 1), full_size=full_size)
 
 
-def _decode_raw(path: Path, max_side: int | None = None) -> DecodedImage:
+def _decode_raw(data: bytes, ext: str, max_side: int | None = None) -> DecodedImage:
     import rawpy
 
-    # From the path, not from memory: LibRaw decodes a memory buffer at about half speed
-    # (measured 1.5 s vs 0.65 s for a 12 MP NEF). The file stays open during the decode.
+    # From memory: with rawpy 0.28 as fast as from the path (12 MP NEF: 326 vs 371 ms at half size, 915 vs
+    # 954 ms in full, measured 2026-11-05), and the protected helper never gets a path.
     try:
-        with rawpy.imread(str(path)) as raw:
+        with rawpy.imread(io.BytesIO(data)) as raw:
             sizes = raw.sizes
             check_pixels(sizes.width, sizes.height)
+            check_pixels(sizes.raw_width, sizes.raw_height)
             # Half size skips demosaicing and is about 4x faster: use it when it still covers the screen.
             half = bool(max_side) and max(sizes.width, sizes.height) // 2 >= max_side
             rgb = raw.postprocess(use_camera_wb=True, output_bps=8, no_auto_bright=False, half_size=half)
-    except (rawpy.LibRawError, OSError) as exc:
+    except (rawpy.LibRawError, OSError, ValueError) as exc:
         raise DecodeError("This camera RAW file is damaged or from an unsupported camera.") from exc
     # LibRaw's output is upright: flip 5 or 6 turns the sensor 90 degrees.
     full_size = QSize(sizes.width, sizes.height)
@@ -392,12 +402,12 @@ def _decode_raw(path: Path, max_side: int | None = None) -> DecodedImage:
     exif_rows: list[MetaItem] = []
     exif_bytes = None
     try:  # Most RAW formats are TIFF-based, so Pillow can usually read their EXIF.
-        with Image.open(path, formats=("TIFF",)) as tiff:  # TIFF-based RAWs only; never another plugin
+        with Image.open(io.BytesIO(data), formats=("TIFF",)) as tiff:  # TIFF-based RAWs only; never another plugin
             exif = tiff.getexif()
             exif_rows, exif_bytes = exif_items(exif), _exif_bytes(exif)
     except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
         pass
-    fmt = f"Camera RAW ({path.suffix.lstrip('.').upper()})"
+    fmt = f"Camera RAW ({ext.lstrip('.').upper()})"
     return DecodedImage([frame], [0], fmt, _image_items(fmt, full_size, 1, extra) + exif_rows, exif_bytes,
                         full_size)
 
@@ -421,37 +431,41 @@ NO_MERGED_IMAGE = ("Photoshop saved this file without a flattened image, so Medi
                    "in Preferences > File Handling, and save the file again.")
 
 
-def psd_header(path: Path) -> tuple[int, int, int, int] | None:
+def psd_header_bytes(head: bytes) -> tuple[int, int, int, int] | None:
     """Width, height, bit depth and colour mode from the 26-byte PSD/PSB header, or None."""
-    with path.open("rb") as f:
-        head = f.read(26)
     if len(head) < 26 or head[:4] != b"8BPS" or head[4:6] not in (b"\x00\x01", b"\x00\x02"):
         return None
     height, width, depth, mode = struct.unpack(">IIHH", head[14:26])
     return width, height, depth, mode
 
 
-def open_psd(path: Path):
+def psd_header(path: Path) -> tuple[int, int, int, int] | None:
+    """``psd_header_bytes`` for a file."""
+    with Path(path).open("rb") as f:
+        return psd_header_bytes(f.read(26))
+
+
+def open_psd(data: bytes):
     """Parse a PSD/PSB after checking its size from the header (psd-tools reads the whole file)."""
     from psd_tools import PSDImage
 
-    header = psd_header(path)
+    header = psd_header_bytes(data[:26])
     if header is None:
         raise DecodeError("The file is damaged or is not a Photoshop file.")
     check_pixels(header[0], header[1])
     try:
-        return PSDImage.open(path), header
+        return PSDImage.open(io.BytesIO(data)), header
     except Exception as exc:  # psd-tools raises its own and struct errors on damaged files
         raise DecodeError("The Photoshop file is damaged or uses features that Media Reader x cannot read.") from exc
 
 
-def _decode_psd(path: Path, max_side: int | None = None, psb: bool = False) -> DecodedImage:
+def _decode_psd(data: bytes, max_side: int | None = None) -> DecodedImage:
     """Show the flattened image Photoshop stores in the file (8, 16 or 32-bit, PSD or PSB).
 
     Layers are not composited here: that needs scipy and scikit-image (about 100 MB), and
     Photoshop saves the flattened image by default ("Maximize compatibility").
     """
-    psd, (_w, _h, depth, mode) = open_psd(path)
+    psd, (_w, _h, depth, mode) = open_psd(data)
     try:
         im = psd.topil() if psd.has_preview() else None  # converted to sRGB from the file's profile
     except Exception as exc:
@@ -465,23 +479,23 @@ def _decode_psd(path: Path, max_side: int | None = None, psb: bool = False) -> D
     gc.collect()
     full_size = QSize(*im.size)
     frame = pil_to_qimage(_shrink_pil(im, max_side))
-    fmt = "Photoshop (PSB)" if psb else "Photoshop (PSD)"
+    fmt = "Photoshop (PSB)" if data[4:6] == b"\x00\x02" else "Photoshop (PSD)"
     extra = [MetaItem("Image", "Colour mode", f"{_PSD_MODES.get(mode, 'Unknown')}, {depth}-bit"),
              MetaItem("Image", "Layers", str(layers))]
     return DecodedImage([frame], [0], fmt, _image_items(fmt, full_size, 1, extra), full_size=full_size)
 
 
-def load_svg(path: Path) -> QSvgRenderer:
-    """A renderer for ``path`` after the safety check in content.load_svg. Raises DecodeError."""
+def load_svg(data: bytes) -> QSvgRenderer:
+    """A renderer for the SVG or SVGZ ``data`` after the safety check in content.check_svg. Raises DecodeError."""
     try:
-        data = content.load_svg(path)
+        checked = content.check_svg(data)
     except content.Refused as exc:
         raise DecodeError(str(exc)) from exc
-    return QSvgRenderer(QByteArray(data))
+    return QSvgRenderer(QByteArray(checked))
 
 
-def _decode_svg(path: Path) -> DecodedImage:
-    renderer = load_svg(path)
+def _decode_svg(data: bytes) -> DecodedImage:
+    renderer = load_svg(data)
     if not renderer.isValid():
         raise DecodeError("The SVG file is damaged or uses unsupported features.")
     base = renderer.defaultSize()
@@ -499,54 +513,81 @@ def _decode_svg(path: Path) -> DecodedImage:
     return DecodedImage([img], [0], "SVG", rows)
 
 
-def decode(path: str | Path, max_side: int | None = None) -> DecodedImage:
-    """Decode ``path`` into display-ready frames plus metadata rows.
-
-    ``max_side`` limits the long side of a still (a screen copy, see ``DecodedImage.reduced``).
-    None decodes full resolution. Animations and SVG always decode as before.
-    """
-    register_plugins()
-    path = Path(path)
-    kind = kind_of(path)
+def image_kind(ext: str) -> MediaKind:
+    """The image kind for a file named ``*{ext}``. Raises DecodeError for videos and unknown types."""
+    kind = kind_of(Path("file" + ext))
     if kind is None or kind is MediaKind.VIDEO:
-        raise DecodeError(f"'{path.suffix}' is not a supported image type.")
-    try:
-        size = path.stat().st_size
-    except OSError as exc:
-        raise DecodeError("The file cannot be read. It may have been moved or you may lack access.") from exc
+        raise DecodeError(f"'{ext}' is not a supported image type.")
+    return kind
+
+
+def check_file_size(size: int) -> None:
     if size > config.MAX_IMAGE_FILE_BYTES:
         raise DecodeError("The file is larger than the 1 GB safety limit for images.")
     if size == 0:
         raise DecodeError("The file is empty.")
 
+
+def decode_bytes(data: bytes, ext: str, max_side: int | None = None) -> DecodedImage:
+    """Decode the content of a file named ``*{ext}`` into display-ready frames and image metadata rows.
+
+    Needs no path: the protected helper process (sandbox.py) runs this on bytes it was handed.
+    ``max_side`` limits the long side of a still (a screen copy, see ``DecodedImage.reduced``).
+    None decodes full resolution. Animations and SVG always decode as before.
+    """
+    register_plugins()
+    kind = image_kind(ext)
+    check_file_size(len(data))
     try:
         notice = None
         if kind is MediaKind.RAW:
-            result = _decode_raw(path, max_side)
+            result = _decode_raw(data, ext, max_side)
         elif kind is MediaKind.SVG:
-            result = _decode_svg(path)
+            result = _decode_svg(data)
         else:
             # The content picks the decoder, from the families the extension allows plus a notice otherwise.
-            head = content.read_head(path)
-            way = route(path, head)
+            way = route_ext(ext, data[:content.HEAD_BYTES])
             notice = way.notice
             if way.family == "psd":
-                result = _decode_psd(path, max_side, psb=head[4:6] == b"\x00\x02")
+                result = _decode_psd(data, max_side)
             elif way.family == "jxl":
-                result = _decode_jxl(path.read_bytes(), max_side)
+                result = _decode_jxl(data, max_side)
             else:
-                result = _decode_pillow(path.read_bytes(), way.family, max_side)
+                result = _decode_pillow(data, way.family, max_side)
         result.notice = notice
-        # Inside the try: the file can vanish between the pixel decode and this stat.
-        result.metadata = file_items(path) + result.metadata
     except DecodeError:
         raise
     except MemoryError as exc:
         raise DecodeError("Not enough memory to open this image.") from exc
     except OSError as exc:
-        raise DecodeError("The file cannot be read. It may have been moved or you may lack access.") from exc
+        raise DecodeError("The file is damaged or cannot be read.") from exc
     except Exception as exc:
         log.exception("Unexpected decoder failure")
         raise DecodeError("Media Reader x cannot open this image. "
                           "To see why, select Help > Open log folder.") from exc
+    return result
+
+
+def read_file(path: Path) -> bytes:
+    """The whole file, after the size limits. Raises DecodeError."""
+    try:
+        check_file_size(path.stat().st_size)
+        return path.read_bytes()
+    except OSError as exc:
+        raise DecodeError("The file cannot be read. It may have been moved or you may lack access.") from exc
+
+
+def decode(path: str | Path, max_side: int | None = None) -> DecodedImage:
+    """Decode ``path`` in this process: ``decode_bytes`` plus the rows about the file itself.
+
+    The app decodes through ``sandbox.decode``, which runs ``decode_bytes`` in a protected helper and
+    falls back to this function only when no helper can start on the PC.
+    """
+    path = Path(path)
+    image_kind(path.suffix)
+    result = decode_bytes(read_file(path), path.suffix, max_side)
+    try:
+        result.metadata = file_items(path) + result.metadata
+    except OSError as exc:  # the file can vanish between the pixel decode and this stat
+        raise DecodeError("The file cannot be read. It may have been moved or you may lack access.") from exc
     return result

@@ -3,7 +3,8 @@
 Decodes tiny images with each bundled codec (HEIC and AVIF from committed probe
 files, so no HEVC or AV1 encoder runs), confirms Qt's FFmpeg multimedia backend
 loads, and checks that the decoder lock, video container check and SVG picture
-check refuse crafted files. Results go to the log and to
+check refuse crafted files. It also starts a protected helper (sandbox.py), decodes with it and checks
+that it cannot read files, use the network or start programs. Results go to the log and to
 %LOCALAPPDATA%\\MediaReaderX\\selftest.txt; the exit code is 0 only if all pass.
 Used by build.ps1 against the frozen app, and useful for IT support.
 """
@@ -182,6 +183,50 @@ def _check_video_backend():
         raise AssertionError("Qt multimedia backend reports no decodable containers")
 
 
+def _check_video_codecs():
+    """FFmpeg's stream list, read at fixed structure offsets (videoprobe.py), must still match this FFmpeg."""
+    from mediareaderx import content, videoprobe
+    from mediareaderx.resources import resource_dir
+
+    probe = resource_dir() / "probe.mp4"
+    head = content.read_head(probe)
+    size = probe.stat().st_size
+    with probe.open("rb") as f:
+        found = videoprobe.streams(f, size, content.ffmpeg_demuxer(head, ".mp4", size <= len(head)) or "")
+    if found != [("video", "mpeg4"), ("audio", "aac")] or videoprobe.refusal(found) is not None:
+        raise AssertionError(f"unexpected streams {found}")
+    if videoprobe.refusal([("video", "ffv1")]) is None:
+        raise AssertionError("a codec outside the list was allowed")
+
+
+def _check_sandbox():
+    """Protected decoding works: a helper decodes, checks a video, and cannot read files, use the network
+    or start programs."""
+    from mediareaderx import sandbox
+    from mediareaderx.resources import resource_dir
+
+    previous = sandbox.worked_before()
+    sandbox.configure(worked_before=True)  # fail closed here: the self-test must not pass in-process
+    try:
+        _sandbox_checks(sandbox, resource_dir)
+    finally:
+        sandbox.configure(worked_before=previous)
+        sandbox.shutdown()
+
+
+def _sandbox_checks(sandbox, resource_dir) -> None:
+    img = sandbox.decode(resource_dir() / "probe.heic")
+    if (img.size.width(), img.size.height()) != (16, 8) or sandbox.state() != "on":
+        raise AssertionError(f"protected decode failed (state {sandbox.state()})")
+    sandbox.check_video(resource_dir() / "probe.mp4")
+    with tempfile.TemporaryDirectory() as tmp:
+        secret = Path(tmp) / "secret.txt"
+        secret.write_text("not for the helper", encoding="utf-8")
+        results = sandbox.selfcheck(secret)
+    if results != {"read": "blocked", "network": "blocked", "process": "blocked", "screen": "blocked"}:
+        raise AssertionError(f"helper not contained: {results}")
+
+
 def _check_printing():
     from PySide6.QtGui import QImage, QPainter, QPdfWriter
     from PySide6.QtPrintSupport import QPrinterInfo
@@ -210,7 +255,8 @@ CHECKS = {
     "SVG (Qt)": _check_svg,
     "Video (Qt FFmpeg backend)": _check_video_backend, "Print and PDF (Qt)": _check_printing,
     "Image decoder lock": _check_image_lock, "Video container check": _check_video_lock,
-    "SVG picture check": _check_svg_lock,
+    "SVG picture check": _check_svg_lock, "Video codec check (FFmpeg streams)": _check_video_codecs,
+    "Protected decoding (sandbox)": _check_sandbox,
 }
 
 

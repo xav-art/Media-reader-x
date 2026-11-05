@@ -65,7 +65,21 @@ M               Mute
 F11             Full screen: only the photo or video shows (Esc to exit)
 
 View > Theme switches between Light, Dark and "Same as Windows".
-File > "Remove location (GPS) when saving" removes GPS from saved copies.
+File > "Remove location (GPS) when saving" removes GPS from saved copies. It is on
+by default.
+File > Open recent > "Remember recent files and folders": turn it off and the app
+stores no file paths.
+Del on a network folder or a USB drive keeps the file and says why: those drives have no Recycle
+Bin, and Media Reader x never deletes a file permanently.
+
+
+PROTECTED DECODING
+------------------
+Media Reader x opens pictures, thumbnails and video checks in small helper
+programs that Windows locks down (no access to your other files, no network).
+You may see several "MediaReaderX.exe" entries in Task Manager: that is normal.
+Help > About shows whether protected decoding is on.
+The first start after installing takes a few seconds longer, once.
 
 
 CHECK THE DOWNLOAD (optional)
@@ -80,10 +94,12 @@ FOR IT / SILENT INSTALL
     MediaReaderX-<version>-Setup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART
 Installs per user into %LOCALAPPDATA%\Programs\Media Reader x (no elevation).
 Health check:  "%LOCALAPPDATA%\Programs\Media Reader x\MediaReaderX.exe" --self-test
-   (exit code 0 = all codecs OK; report in %LOCALAPPDATA%\MediaReaderX\selftest.txt)
+   (exit code 0 = all codecs OK and protected decoding works;
+   report in %LOCALAPPDATA%\MediaReaderX\selftest.txt)
 Settings and logs: %LOCALAPPDATA%\MediaReaderX (logs contain file types and sizes,
 never file paths or names). No network access, no telemetry.
 Software bill of materials: MediaReaderX-<version>-sbom.cdx.json (CycloneDX).
+Licences: THIRD_PARTY_NOTICES.txt. Source of the GPL and LGPL parts: the source folder.
 
 
 PROBLEMS?

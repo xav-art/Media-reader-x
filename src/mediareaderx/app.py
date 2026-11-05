@@ -43,7 +43,17 @@ def _install_excepthook() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = parse_args(sys.argv[1:] if argv is None else argv)
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["--sandbox-helper"]:  # a protected helper process: no log file, no window
+        from mediareaderx.sandbox.worker import main as helper_main
+
+        return helper_main(argv[1:])
+    if argv[:1] == ["--remove-sandbox"]:  # the uninstaller: delete the helpers' AppContainer profiles
+        from mediareaderx.sandbox import remove_profiles
+
+        remove_profiles()
+        return 0
+    args = parse_args(argv)
 
     from PySide6.QtCore import QCoreApplication
     from PySide6.QtGui import QIcon
@@ -78,13 +88,19 @@ def main(argv: list[str] | None = None) -> int:
 
     window = MainWindow()
     window.show()
+    from mediareaderx import sandbox
+
+    sandbox.start()  # protected helpers start in the background, so the first file does not wait
     if args.file:
         window.open_path(args.file)
     else:
-        # The welcome screen is idle time: load the codecs now, so the first photo opens at full speed.
-        from mediareaderx.decoders import warm_up
+        # The welcome screen is idle time: load the codecs now, so the first photo opens at full speed
+        # (in this process only when protected decoding is off; helpers warm up on their own).
+        if sandbox.in_process():
+            from mediareaderx.decoders import warm_up
 
-        threading.Thread(target=warm_up, name="codec-warm-up", daemon=True).start()
+            threading.Thread(target=warm_up, name="codec-warm-up", daemon=True).start()
     code = app.exec()
+    sandbox.shutdown()
     log.info("Exiting with code %s", code)
     return code

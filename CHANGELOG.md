@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.6.0 - 2026-11-05
+
+Security: protected decoding. Pictures, thumbnails and video checks run in locked-down helper processes.
+
+- Every decoder that reads a file (LibRaw, libheif, libde265, libjxl, Pillow, psd-tools, Qt SVG and
+  FFmpeg for thumbnails and checks) now runs in a separate helper process inside a Windows
+  AppContainer. A helper gets a read-only handle to one file, never its name. It cannot read your
+  other files, write outside its own folder, use the network, start programs, use the clipboard or
+  see your screen (it runs on its own empty desktop). Each helper has its own container, so one
+  helper cannot reach another, and a memory limit. If a crafted file takes over a helper, the app
+  says the file is damaged and starts a new helper. No admin rights are needed.
+- Fail closed: once protected decoding has worked on a PC, the app never silently goes back to
+  decoding in its own process. Only on a PC where helpers have never started (for example a policy
+  blocks AppContainers) does it decode as before, and it says so. Help > About shows the state, and
+  `--self-test` checks that a helper decodes and is contained.
+- Videos play only with common codecs (H.264, HEVC, VP8, VP9, AV1, MPEG-1/2/4, WMV and the sound
+  formats that go with them). A fresh helper reads the codec list before the player gets the file.
+  Qt's FFmpeg has about 500 decoders; a crafted video can now reach about 40. Videos with DVD,
+  Blu-ray or DVB picture subtitles are refused (FFmpeg opens a subtitle decoder even when subtitles
+  are off). Video thumbnails are now made by a helper, without the graphics card, so AV1 videos show
+  no thumbnail picture.
+- Text from files (metadata, names, error messages) is always shown as plain text. Before, a crafted
+  EXIF field shown as a tooltip could make Qt load a picture, including from a network share.
+- JPEG XL: the size check now reads codestreams split over several boxes (a crafted file could
+  report 1 x 1 pixels and then decode at full size). Animations show their first frame: libjxl decodes
+  every frame at once, before any memory cap applies.
+- Multi-page TIFF: every page is size-checked, not only the first.
+- A video that cannot be read is refused instead of being handed to the player unchecked.
+- Logs never contain paths or file names, also not in error messages, tracebacks or Qt warnings.
+- Delete refuses files on drives without a Recycle Bin (network folders, USB drives, memory cards,
+  drives set to delete at once, files larger than the Recycle Bin). Before, Windows deleted those
+  permanently, without a prompt.
+- The installer never runs the old 1.0 uninstaller when it is started with admin rights, and the
+  uninstaller removes the helpers' AppContainer profiles.
+
+Privacy:
+
+- "Save a copy" removes the location (GPS) by default. You can turn this off in the File menu.
+- File > Open recent > "Remember recent files and folders" can be turned off: the app then stores no
+  file paths in its settings.
+
+Licences:
+
+- THIRD_PARTY_NOTICES.txt now has the full GPL and LGPL texts, a copyright line and an exact source
+  link for every bundled library. It no longer says x265 is "statically included" (it is a separate,
+  never-called DLL that libheif links). The binary distribution as a whole is conveyed under GPL-3.0;
+  Media Reader x's own code stays MIT. The matching source archives (x265, libheif, libde265, LibRaw,
+  FFmpeg, the pillow-heif and rawpy build scripts) ship in `dist\source`.
+- The SBOM lists an SPDX licence for every component.
+- The README no longer claims HEVC plays "without the paid Microsoft extension" and says that no
+  codec patent licence comes with the app.
+
 ## 1.5.0 - 2026-11-04
 
 Security: each file reaches only the one decoder for its content.

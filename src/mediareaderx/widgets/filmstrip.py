@@ -11,8 +11,10 @@ from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPixmap, QPoly
 from PySide6.QtWidgets import QAbstractItemView, QDockWidget, QListView, QListWidget, QListWidgetItem, QWidget
 
 from mediareaderx.formats import MediaKind, kind_of
+from mediareaderx import ui_text
 from mediareaderx.theme import CORAL
-from mediareaderx.thumbnails import VideoThumbnailer, make_thumbnail
+from mediareaderx.sandbox import make_thumbnail  # protected helpers
+from mediareaderx.video_thumbs import ProtectedVideoThumbnailer
 from mediareaderx.widgets.video_view import fmt_ms
 
 ICON = QSize(112, 84)
@@ -159,7 +161,7 @@ class Filmstrip(QDockWidget):
         self._pool.setMaxThreadCount(2)
         self._signals = _ThumbSignals(self)
         self._signals.done.connect(self._on_thumb)
-        self._video = VideoThumbnailer(self)
+        self._video = ProtectedVideoThumbnailer(self)
         self._video.ready.connect(self._on_video_thumb)
         self._video.failed.connect(self._video_pending.discard)
 
@@ -183,7 +185,7 @@ class Filmstrip(QDockWidget):
                 icon = self._cache.get(key) or self._placeholder(label, is_video)
                 item = QListWidgetItem(icon, "")
                 item.setData(PATH_ROLE, key)
-                item.setToolTip(path.name)
+                item.setToolTip(ui_text.tooltip(path.name))
                 item.setData(Qt.ItemDataRole.AccessibleTextRole, f"{path.name}, {label}")
                 item.setSizeHint(GRID)
                 self.list.addItem(item)

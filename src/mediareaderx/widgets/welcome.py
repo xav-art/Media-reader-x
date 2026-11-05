@@ -11,7 +11,7 @@ from PySide6.QtGui import QImage, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
-from mediareaderx import APP_NAME
+from mediareaderx import APP_NAME, ui_text
 from mediareaderx.resources import resource_dir
 from mediareaderx.theme import CORAL, INK
 
@@ -96,6 +96,7 @@ class WelcomeView(QWidget):
         buttons.addStretch(1)
 
         self.recent_title = QLabel("Recent files", self)
+        ui_text.plain(self.logo, title, intro, self.recent_title)
         bold = self.recent_title.font()
         bold.setBold(True)
         self.recent_title.setFont(bold)
@@ -140,7 +141,7 @@ class WelcomeView(QWidget):
             # Enough vertical padding that underscores in names (IMG_1234) are not clipped.
             btn.setStyleSheet("text-align: left; padding: 6px 8px 8px 8px;")
             btn.setMinimumHeight(btn.fontMetrics().height() + 16)
-            btn.setToolTip(path)
+            btn.setToolTip(ui_text.tooltip(path))
             btn.setAccessibleName(f"Open recent file {p.name}")
             btn.clicked.connect(lambda _=False, x=path: self.recentRequested.emit(x))
             self.recent_box.addWidget(btn)

@@ -19,7 +19,7 @@ from mediareaderx.thumbnails import THUMB_SIDE, VideoThumbnailer, make_thumbnail
 from mediareaderx.decoders import decode
 
 
-def wait_until(predicate, timeout_ms=8000):
+def wait_until(predicate, timeout_ms=20000):  # protected helpers may need to start first
     timer = QElapsedTimer()
     timer.start()
     while not predicate():

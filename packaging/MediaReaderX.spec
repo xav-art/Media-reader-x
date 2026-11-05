@@ -40,9 +40,12 @@ a = Analysis(
         "pillow_heif", "rawpy",
         # imagecodecs loads codecs lazily; bundle only the JPEG XL one (~44 MB saved).
         "imagecodecs._jpegxl", "imagecodecs._shared", "imagecodecs._shared_cython",
+        # The protected helper's entry point (MediaReaderX.exe --sandbox-helper) and its codec check.
+        "mediareaderx.sandbox.worker", "mediareaderx.videoprobe",
     ],
     excludes=[
         "tkinter", "av", "pytest", "PyInstaller", "setuptools", "pip", "ssl", "numpy.random", "numpy.fft",
+        "numpy.f2py",  # a Fortran build tool: unused, and it pulls charset-normalizer into the bundle
         "PySide6.QtQml", "PySide6.QtQuick", "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets",
         "PySide6.Qt3DCore", "PySide6.QtCharts", "PySide6.QtDataVisualization", "PySide6.QtPdf",
         "PySide6.QtSql", "PySide6.QtTest", "PySide6.QtDesigner", "PySide6.QtBluetooth",

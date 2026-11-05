@@ -16,7 +16,7 @@ from mediareaderx.printing import (Cell, PrintOptions, cell_rects, crop_rect, fi
 from mediareaderx.widgets.print_dialog import PrintDialog, read_options, write_options
 
 
-def wait_until(predicate, timeout_ms=8000):
+def wait_until(predicate, timeout_ms=20000):  # protected helpers may need to start first
     timer = QElapsedTimer()
     timer.start()
     while not predicate():

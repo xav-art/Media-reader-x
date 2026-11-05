@@ -59,6 +59,7 @@ class VideoView(QWidget):
         self.seek.setAccessibleName("Playback position")
         self.seek.sliderMoved.connect(self._user_seek)
         self.time_label = QLabel("0:00 / 0:00", self)
+        self.time_label.setTextFormat(Qt.TextFormat.PlainText)
 
         self.mute_btn = QToolButton(self)
         self.mute_btn.setIcon(style.standardIcon(QStyle.StandardPixmap.SP_MediaVolume))

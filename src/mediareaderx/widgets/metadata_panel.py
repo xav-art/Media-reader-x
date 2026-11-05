@@ -6,6 +6,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QGuiApplication
 from PySide6.QtWidgets import QAbstractItemView, QDockWidget, QTreeWidget, QTreeWidgetItem
 
+from mediareaderx import ui_text
 from mediareaderx.metadata import MetaItem
 
 
@@ -51,7 +52,7 @@ class MetadataPanel(QDockWidget):
                 parent.setExpanded(item.section != "EXIF (all tags)")
                 sections[item.section] = parent
             child = QTreeWidgetItem(parent, [item.key, item.value])
-            child.setToolTip(1, item.value)
+            child.setToolTip(1, ui_text.tooltip(item.value))  # EXIF text from the file: never rich text
         self.tree.resizeColumnToContents(0)
 
     def clear(self) -> None:

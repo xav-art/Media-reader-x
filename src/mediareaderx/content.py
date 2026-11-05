@@ -269,12 +269,18 @@ def check_video(path: str | Path) -> str | None:
     The check does not choose the codec inside the container.
     """
     path = Path(path)
-    ext = path.suffix.lower()
     try:
         head = read_head(path)
         size = path.stat().st_size
     except OSError:
-        return None  # unreadable: the player reports it
+        # Refuse, never "let the player report it": the player would open the file without this check.
+        raise Refused("The file cannot be read. It may have been moved or you may lack access.") from None
+    return check_video_head(head, path.suffix, size)
+
+
+def check_video_head(head: bytes, ext: str, size: int) -> str | None:
+    """``check_video`` for the first bytes of a file named ``*{ext}`` that is ``size`` bytes long."""
+    ext = ext.lower()
     found = sniff(head)
     if found is None or found.kind != "video":
         raise Refused(refusal(found, ext, "video"))
@@ -359,7 +365,12 @@ def _check_data_uri(value: str) -> None:
 
 
 def load_svg(path: str | Path) -> bytes:
-    """Read an SVG or SVGZ and return plain SVG bytes that are safe to give to Qt's renderer.
+    """``check_svg`` for a file. Raises Refused."""
+    return check_svg(Path(path).read_bytes())
+
+
+def check_svg(raw: bytes) -> bytes:
+    """Check an SVG or SVGZ file's content and return plain SVG bytes that are safe to give to Qt's renderer.
 
     Qt's SVG renderer loads any picture an <image> names: files anywhere on the PC, and embedded data
     in any format Qt has a plugin for. Only embedded PNG and JPEG pictures are allowed, checked by
@@ -368,7 +379,6 @@ def load_svg(path: str | Path) -> bytes:
     """
     from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QXmlStreamReader
 
-    raw = Path(path).read_bytes()
     if raw[:2] == b"\x1f\x8b":
         inflater = zlib.decompressobj(wbits=31)
         try:

@@ -85,6 +85,14 @@ if (-not (Test-Path "$Root\src\mediareaderx\assets\app.ico")) {
 Invoke-Checked $Py @("$Root\tools\gen_notices.py", "$Root\THIRD_PARTY_NOTICES.txt")
 Invoke-Checked $Py @("$Root\tools\gen_iss_associations.py", "$Root\packaging\associations.iss")
 
+# --- GPL and LGPL source archives (tools\fetch_sources.py, packaging\sources.json) ---------------------
+# x265 is GPL; libheif, libde265, LibRaw and FFmpeg are LGPL. Their source ships next to the binaries, in
+# dist\source (copied there in the checksum step). Downloaded once into
+# %LOCALAPPDATA%\MediaReaderX-build\sources and checked against the pinned SHA-256 on every build.
+Step 'GPL and LGPL source archives'
+Invoke-Checked $Py @("$Root\tools\fetch_sources.py", "$Root\build\source")
+# --- end of the source archives step ---------------------------------------------------------------
+
 Step 'PyInstaller'
 Invoke-Checked $Py @('-m', 'PyInstaller', '--noconfirm', '--clean', '--log-level', 'WARN',
     '--distpath', "$Root\build\dist", '--workpath', "$Root\build\work", "$Root\packaging\MediaReaderX.spec")
@@ -118,8 +126,10 @@ Step 'SBOM and checksums'
 Copy-Item $Sbom "$Dist\MediaReaderX-$Version-sbom.cdx.json"
 Copy-Item "$Root\docs\INSTALL.txt" "$Dist\INSTALL.txt"
 Copy-Item "$Root\THIRD_PARTY_NOTICES.txt" $Dist
-$Sums = Get-ChildItem $Dist -File | Where-Object Name -ne 'SHA256SUMS.txt' | ForEach-Object {
-    "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name
+Copy-Item -Recurse "$Root\build\source" "$Dist\source"  # from the source archives step
+# Recursive, so the source archives are covered too (paths like source/x265_4.3.tar.gz).
+$Sums = Get-ChildItem $Dist -File -Recurse | Where-Object FullName -ne "$Dist\SHA256SUMS.txt" | ForEach-Object {
+    "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.FullName.Substring($Dist.Length + 1).Replace('\', '/')
 }
 if (-not $Sums) { throw 'No files found to checksum in dist' }
 $Sums | Set-Content -Encoding ascii "$Dist\SHA256SUMS.txt"

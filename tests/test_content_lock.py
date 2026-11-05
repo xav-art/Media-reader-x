@@ -346,7 +346,7 @@ def test_window_shows_the_notice_and_refuses_fake_video(tmp_path, qapp):
 
     from mediareaderx.main_window import MainWindow
 
-    def wait_until(predicate, timeout_ms=8000):
+    def wait_until(predicate, timeout_ms=20000):  # protected helpers may need to start first
         timer = QElapsedTimer()
         timer.start()
         while not predicate():

@@ -60,6 +60,10 @@ Name: "{autodesktop}\Media Reader x"; Filename: "{app}\MediaReaderX.exe"; Tasks:
 [Run]
 Filename: "{app}\MediaReaderX.exe"; Description: "Launch Media Reader x"; Flags: nowait postinstall skipifsilent
 
+[UninstallRun]
+; Delete the protected decoders' AppContainer profiles (docs/SANDBOX.md). The app folder goes with the files.
+Filename: "{app}\MediaReaderX.exe"; Parameters: "--remove-sandbox"; Flags: runhidden waituntilterminated; RunOnceId: "RemoveSandbox"
+
 [Code]
 // Version 1.0 shipped as "Media Reader" under a different AppId. Remove it
 // silently so users never end up with both apps and duplicate "Open with" entries.
@@ -71,6 +75,12 @@ var
   UninstallString: String;
   ResultCode: Integer;
 begin
+  // The command comes from a registry value any program of this user can change: never run it elevated.
+  if IsAdmin then
+  begin
+    Log('Running elevated: the legacy Media Reader 1.0 check is skipped');
+    exit;
+  end;
   if RegQueryStringValue(HKCU, LegacyUninstallKey, 'UninstallString', UninstallString) then
   begin
     Log('Removing legacy Media Reader 1.0: ' + UninstallString);
