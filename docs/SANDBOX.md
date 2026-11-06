@@ -32,9 +32,15 @@ helper, `__init__.py` the pool and the policy), `videoprobe.py` (video codec che
 - **No network, no files.** No `internetClient` capability. The helper can read Windows system files and
   the app's folder, and write only its own `%LOCALAPPDATA%\Packages\xav-art.mediareaderx.helper.N\AC`.
 - **Another window station.** Helpers run on an empty desktop of this app copy's own (`Helpers-<pid>`) in
-  the window station Windows hands out for an unnamed request: the logon session's service station, as
-  Chromium's sandbox does (this PC refuses named stations). The app adds the capability to that station's
-  access list. A desktop on the user's station alone was not enough: an AppContainer process can open the
+  a window station that is not the user's. First choice: a new, named station of the app copy's own
+  (random name, create-only), which only the user, SYSTEM, its owner and the capability can open. The
+  capability gets the station rights and READ_CONTROL, never the right to change the access list.
+  Where creating it fails (seen on this PC; the log says which station is used), the app uses the station
+  Windows hands out for an unnamed request: the logon session's service station, as Chromium's sandbox
+  does, and adds the capability to its access list. That one does not work for an elevated built-in
+  Administrator (GitHub's Windows runner); the named station does. The self-test checks that the helper's
+  station is not WinSta0 and that opening WinSta0 fails with "access denied" (any other error fails the
+  self-test). A desktop on the user's station alone was not enough: an AppContainer process can open the
   user's desktop (WinSta0\Default) by name and capture the screen. From another window station it cannot
   open WinSta0 at all. `--self-test` checks both: a screen capture shows nothing, and WinSta0\Default
   cannot be opened.

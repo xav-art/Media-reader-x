@@ -10,8 +10,13 @@ from __future__ import annotations
 
 import ctypes
 import functools
+import logging
+import os
+import secrets
 from ctypes import wintypes as wt
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 k32 = ctypes.WinDLL("kernel32", use_last_error=True)
 kbase = ctypes.WinDLL("kernelbase", use_last_error=True)
@@ -326,7 +331,7 @@ _SetProcessWindowStation = _sig(user32, "SetProcessWindowStation", wt.BOOL, HAND
 _CloseWindowStation = _sig(user32, "CloseWindowStation", wt.BOOL, HANDLE)
 _GetUserObjectInformation = _sig(user32, "GetUserObjectInformationW", wt.BOOL, HANDLE, ctypes.c_int, ctypes.c_void_p,
                                  wt.DWORD, ctypes.POINTER(wt.DWORD))
-WINSTA_ALL_ACCESS, UOI_NAME = 0x37F, 2
+WINSTA_ALL_ACCESS, UOI_NAME, CWF_CREATE_ONLY = 0x37F, 2, 0x1
 READ_CONTROL, WRITE_DAC = 0x20000, 0x40000
 _station_lock = __import__("threading").Lock()
 
@@ -369,19 +374,41 @@ def private_station(cap, desktop_name: str) -> tuple[int, int, str]:
 
     A desktop on WinSta0 is not enough: an AppContainer process may open the interactive desktop
     (WinSta0\\Default) by name and capture the screen (verified 2026-11-05). From another window station it
-    cannot open WinSta0 at all (access denied, verified). Like Chromium's sandbox, this uses the window station
-    Windows gives an unnamed request: the logon session's service station (shared by every running copy;
-    this PC refuses named ones). The capability gets access to it, and the desktop is this process's own.
+    cannot open WinSta0 at all (access denied, verified).
+
+    First choice: a named station of this process's own, newly created (CWF_CREATE_ONLY, a random name), that
+    only the user, the capability (station rights and READ_CONTROL), SYSTEM and its owner can open. Where
+    creating it fails (seen on this PC; the log says which station is used), the fallback is the station Windows
+    gives an
+    unnamed request, as Chromium's sandbox does: the logon session's service station, shared by every running
+    copy; the capability gets access to it.
+    The unnamed station does not work for an elevated built-in Administrator (GitHub's Windows runner: user32
+    fails in the helper, verified 2026-11-06); the named one does. The desktop is always this process's own.
     Creating the desktop needs the station as this process's station for a moment. Keep both handles open
     while helpers run."""
-    sddl = f"D:P(A;;GA;;;{user_sid_string()})(A;;GA;;;{sid_string(cap)})(A;;GA;;;SY)"
-    sd = ctypes.c_void_p()
+    user, capability = user_sid_string(), sid_string(cap)
+    sddl = f"D:P(A;;GA;;;{user})(A;;GA;;;{capability})(A;;GA;;;SY)"
+    # The station's own list: the capability gets the station rights and READ_CONTROL (0x2037F; user32 in the
+    # helper needs it, verified on GitHub's runner), never WRITE_DAC, WRITE_OWNER or DELETE, so a taken-over
+    # helper cannot open the station to others.
+    station_sddl = f"D:P(A;;GA;;;{user})(A;;0x2037F;;;{capability})(A;;GA;;;SY)"
+    sd, station_sd = ctypes.c_void_p(), ctypes.c_void_p()
     _check(_ConvertSddl(sddl, 1, ctypes.byref(sd), None), "ConvertStringSecurityDescriptor")
     try:
+        _check(_ConvertSddl(station_sddl, 1, ctypes.byref(station_sd), None), "ConvertStringSecurityDescriptor")
         sa = SECURITY_ATTRIBUTES(ctypes.sizeof(SECURITY_ATTRIBUTES), sd, False)
-        # Windows' default access list for the station: other programs' sandboxes (Chrome, Edge) use the same one.
-        station = _CreateWindowStation(None, 0, WINSTA_ALL_ACCESS | READ_CONTROL | WRITE_DAC, None)
-        can_grant = bool(station)
+        station_sa = SECURITY_ATTRIBUTES(ctypes.sizeof(SECURITY_ATTRIBUTES), station_sd, False)
+        own_name = f"MediaReaderX-{os.getpid()}-{secrets.token_hex(8)}"
+        station = _CreateWindowStation(own_name, CWF_CREATE_ONLY, WINSTA_ALL_ACCESS, ctypes.byref(station_sa))
+        can_grant = False  # our own access list already has the capability
+        if station:
+            log.info("Helper window station: own named station")
+        else:
+            log.info("Helper window station: own named station refused (error %d), using the session's service "
+                     "station", ctypes.get_last_error())
+            # Windows' default access list for the station: other programs' sandboxes (Chrome, Edge) use it too.
+            station = _CreateWindowStation(None, 0, WINSTA_ALL_ACCESS | READ_CONTROL | WRITE_DAC, None)
+            can_grant = bool(station)
         if not station:  # an existing station may refuse changes to its access list: use it as it is
             station = _check(_CreateWindowStation(None, 0, WINSTA_ALL_ACCESS, None), "CreateWindowStation")
         desktop = None
@@ -405,6 +432,8 @@ def private_station(cap, desktop_name: str) -> tuple[int, int, str]:
         return station, desktop, f"{name.value}\\{desktop_name}"
     finally:
         _LocalFree(sd)
+        if station_sd.value:
+            _LocalFree(station_sd)
 
 
 def close_station(station: int | None, desktop: int | None) -> None:

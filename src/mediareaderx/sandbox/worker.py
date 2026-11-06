@@ -184,25 +184,41 @@ def _selfcheck(req: dict) -> tuple[dict, list]:
         results["process"] = "blocked"
     results["screen"] = _screen_capture()
     results["user_desktop"] = _user_desktop()
+    results["station"] = _own_station()
     return {"ok": True, "results": results}, []
 
 
-def _user_desktop() -> str:
-    """"blocked" when the helper cannot open the user's window station or desktop (WinSta0\\Default)."""
+def _user32():
     import ctypes
-    import threading
     from ctypes import wintypes as wt
 
-    user32 = ctypes.WinDLL("user32")
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
     user32.OpenWindowStationW.restype = wt.HANDLE
     user32.OpenWindowStationW.argtypes = [wt.LPCWSTR, wt.BOOL, wt.DWORD]
     user32.OpenDesktopW.restype = wt.HANDLE
     user32.OpenDesktopW.argtypes = [wt.LPCWSTR, wt.DWORD, wt.BOOL, wt.DWORD]
-    found = []
+    user32.GetProcessWindowStation.restype = wt.HANDLE
+    user32.GetUserObjectInformationW.argtypes = [wt.HANDLE, ctypes.c_int, ctypes.c_void_p, wt.DWORD,
+                                                 ctypes.POINTER(wt.DWORD)]
+    return user32
+
+
+def _user_desktop() -> str:
+    """"blocked" when the helper cannot open the user's window station or desktop (WinSta0\\Default) because
+    access is denied. Any other failure (user32 not working, for example) is reported as an error, so the
+    self-test never counts a broken helper as a contained one."""
+    import ctypes
+    import threading
+    from ctypes import wintypes as wt
+
+    user32 = _user32()
+    found, errors = [], []
 
     def attempt() -> None:  # a new thread, as an attacker would use: its desktop is not yet fixed
         station = user32.OpenWindowStationW("WinSta0", False, 0x1 | 0x2 | 0x100)
+        errors.append(0 if station else ctypes.get_last_error())
         desktop = user32.OpenDesktopW("Default", 0, False, 0x1 | 0x40 | 0x80)
+        errors.append(0 if desktop else ctypes.get_last_error())
         found.extend(h for h in (station, desktop) if h)
         if station:
             user32.CloseWindowStation(wt.HANDLE(station))
@@ -212,7 +228,21 @@ def _user_desktop() -> str:
     thread = threading.Thread(target=attempt)
     thread.start()
     thread.join()
-    return "open" if found else "blocked"
+    if found:
+        return "open"
+    # WinSta0: 5 (ERROR_ACCESS_DENIED). "Default" is looked up in the helper's own station: 2 (not found) or 5.
+    return "blocked" if errors[0] == 5 and errors[1] in (2, 5) else f"error {errors}"
+
+
+def _own_station() -> str:
+    """"separate" when the helper's own window station is not the user's (WinSta0)."""
+    import ctypes
+
+    user32 = _user32()
+    name = ctypes.create_unicode_buffer(256)
+    if not user32.GetUserObjectInformationW(user32.GetProcessWindowStation(), 2, name, ctypes.sizeof(name), None):
+        return f"error {ctypes.get_last_error()}"
+    return "WinSta0" if name.value.lower() == "winsta0" else "separate"
 
 
 def _screen_capture() -> str:

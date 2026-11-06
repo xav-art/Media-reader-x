@@ -178,7 +178,7 @@ def test_helper_is_contained(qapp, tmp_path):
     secret = tmp_path / "secret.txt"
     secret.write_text("private", encoding="utf-8")
     assert sandbox.selfcheck(secret) == {"read": "blocked", "network": "blocked", "process": "blocked",
-                                         "screen": "blocked", "user_desktop": "blocked"}
+                                         "screen": "blocked", "user_desktop": "blocked", "station": "separate"}
 
 
 @windows
