@@ -1,13 +1,14 @@
 # Changelog
 
-## Unreleased
+## 1.6.2 - 2026-11-06
 
 Security:
 
 - Helpers now run in a new window station of the app's own (random name, create-only), which only the user,
   SYSTEM and the helpers can open; the helpers cannot change who may open it. Where Windows refuses that, as
-  on a standard user's PC, they use the session's service station as before. The service station did not work for an elevated
-  built-in Administrator (GitHub's Windows build machines): helpers could not start there.
+  on a standard user's PC, they use the session's service station as before. The service station did not
+  work for an elevated built-in Administrator (GitHub's Windows build machines): helpers could not start there.
+- Build tools: pytest 9.2.0, cyclonedx-bom 7.6.0 (not shipped in the app).
 - The self-test is stricter: opening the user's window station must fail with "access denied" (any other
   error fails the test), and the helper must report a window station other than the user's.
 
