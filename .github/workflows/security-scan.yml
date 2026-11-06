@@ -1,0 +1,72 @@
+# Fortnightly check of the build that colleagues use: grype scans the SBOM of the shipped version
+# (packaging/shipped/), with the exceptions in packaging/vuln-exceptions.json. A new High or Critical
+# finding, an exception that expires within 30 days, or a scanner error fails the run, and GitHub emails
+# the owner. The logs are public, so they show counts only; the step summary says what to do.
+name: Security scan
+
+on:
+  schedule:
+    - cron: "17 5 1,15 * *"  # 05:17 UTC on the 1st and 15th of each month
+  workflow_dispatch:
+    inputs:
+      prove_alert:
+        description: Fail on purpose, to check that the failure email arrives
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.14"
+
+      - name: Install grype (checksum checked)
+        uses: ./.github/actions/install-grype
+
+      - name: Find the shipped SBOM
+        id: sbom
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem packaging/shipped -Filter 'MediaReaderX-*-sbom.cdx.json')
+          if ($files.Count -ne 1) {
+            "SETUP ERROR: packaging/shipped must hold exactly one SBOM, it holds $($files.Count)." >> $env:GITHUB_STEP_SUMMARY
+            exit 1
+          }
+          $shipped = $files[0].Name -replace '^MediaReaderX-(.+)-sbom\.cdx\.json$', '$1'
+          $code = (Select-String -Path src/mediareaderx/__init__.py -Pattern '__version__ = "([^"]+)"').Matches[0].Groups[1].Value
+          "Scanning the SBOM of the shipped version $shipped." >> $env:GITHUB_STEP_SUMMARY
+          if ($shipped -ne $code) {
+            $msg = "The code is at $code but packaging/shipped holds $shipped. After a release, put its SBOM there (SECURITY.md)."
+            "::warning::$msg"
+            "WARNING: $msg" >> $env:GITHUB_STEP_SUMMARY
+          }
+          "path=$($files[0].FullName)" >> $env:GITHUB_OUTPUT
+
+      - name: Scan the shipped build
+        shell: pwsh
+        env:
+          SBOM: ${{ steps.sbom.outputs.path }}
+        run: |
+          python tools/vuln_scan.py --strict $env:SBOM build/security
+          exit $LASTEXITCODE
+
+      - name: Prove the failure email (manual runs only)
+        if: ${{ inputs.prove_alert }}
+        shell: pwsh
+        run: |
+          "ALERT TEST: this run failed on purpose. If you got the email, notifications work." >> $env:GITHUB_STEP_SUMMARY
+          exit 1

@@ -1,0 +1,1294 @@
+{
+  "components": [
+    {
+      "bom-ref": "requirements-L4",
+      "description": "requirements line 4: PySide6-Addons==6.12.0",
+      "externalReferences": [
+        {
+          "comment": "implicit dist url",
+          "type": "distribution",
+          "url": "https://pypi.org/simple/PySide6-Addons/"
+        }
+      ],
+      "name": "PySide6-Addons",
+      "purl": "pkg:pypi/pyside6-addons@6.12.0",
+      "type": "library",
+      "version": "6.12.0"
+    },
+    {
+      "bom-ref": "requirements-L3",
+      "description": "requirements line 3: PySide6-Essentials==6.12.0",
+      "externalReferences": [
+        {
+          "comment": "implicit dist url",
+          "type": "distribution",
+          "url": "https://pypi.org/simple/PySide6-Essentials/"
+        }
+      ],
+      "name": "PySide6-Essentials",
+      "purl": "pkg:pypi/pyside6-essentials@6.12.0",
+      "type": "library",
+      "version": "6.12.0"
+    },
+    {
+      "bom-ref": "requirements-L12",
+      "description": "requirements line 12: attrs==26.1.0",
+      "externalReferences": [
+        {
+          "comment": "implicit dist url",
+          "type": "distribution",
+          "url": "https://pypi.org/simple/attrs/"
+        }
+      ],
+      "name": "attrs",
+      "purl": "pkg:pypi/attrs@26.1.0",
+      "type": "library",
+      "version": "26.1.0"
+    },
+    {
+      "bom-ref": "requirements-L8",
+      "description": "requirements line 8: imagecodecs==2026.10.10",
+      "externalReferences": [
+        {
+          "comment": "implicit dist url",
+          "type": "distribution",
+          "url": "https://pypi.org/simple/imagecodecs/"
+        }
+      ],
+      "name": "imagecodecs",
+      "purl": "pkg:pypi/imagecodecs@2026.10.10",
+      "type": "library",
+      "version": "2026.10.10"
+    },
+    {
+      "bom-ref": "requirements-L10",
+      "description": "requirements line 10: numpy==2.5.4",
+      "externalReferences": [
+        {
+          "comment": "implicit dist url",
+          "type": "distribution",
+          "url": "https://pypi.org/simple/numpy/"
+        }
+      ],
+      "name": "numpy",
+      "purl": "pkg:pypi/numpy@2.5.4",
+      "type": "library",
+      "version": "2.5.4"
+    },
+    {
+      "bom-ref": "requirements-L6",
+      "description": "requirements line 6: pillow==13.0.0",
+      "externalReferences": [
+        {
+          "comment": "implicit dist url",
+          "type": "distribution",
+          "url": "https://pypi.org/simple/pillow/"
+        }
+      ],
+      "name": "pillow",
+      "purl": "pkg:pypi/pillow@13.0.0",
+      "type": "library",
+      "version": "13.0.0"
+    },
+    {
+      "bom-ref": "requirements-L7",
+      "description": "requirements line 7: pillow-heif==1.8.1",
+      "externalReferences": [
+        {
+          "comment": "implicit dist url",
+          "type": "distribution",
+          "url": "https://pypi.org/simple/pillow-heif/"
+        }
+      ],
+      "name": "pillow-heif",
+      "purl": "pkg:pypi/pillow-heif@1.8.1",
+      "type": "library",
+      "version": "1.8.1"
+    },
+    {
+      "bom-ref": "requirements-L11",
+      "description": "requirements line 11: psd-tools==1.26.0",
+      "externalReferences": [
+        {
+          "comment": "implicit dist url",
+          "type": "distribution",
+          "url": "https://pypi.org/simple/psd-tools/"
+        }
+      ],
+      "name": "psd-tools",
+      "purl": "pkg:pypi/psd-tools@1.26.0",
+      "type": "library",
+      "version": "1.26.0"
+    },
+    {
+      "bom-ref": "requirements-L9",
+      "description": "requirements line 9: rawpy==0.28.0",
+      "externalReferences": [
+        {
+          "comment": "implicit dist url",
+          "type": "distribution",
+          "url": "https://pypi.org/simple/rawpy/"
+        }
+      ],
+      "name": "rawpy",
+      "purl": "pkg:pypi/rawpy@0.28.0",
+      "type": "library",
+      "version": "0.28.0"
+    },
+    {
+      "bom-ref": "requirements-L5",
+      "description": "requirements line 5: shiboken6==6.12.0",
+      "externalReferences": [
+        {
+          "comment": "implicit dist url",
+          "type": "distribution",
+          "url": "https://pypi.org/simple/shiboken6/"
+        }
+      ],
+      "name": "shiboken6",
+      "purl": "pkg:pypi/shiboken6@6.12.0",
+      "type": "library",
+      "version": "6.12.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:libheif",
+      "name": "libheif",
+      "version": "1.23.6",
+      "purl": "pkg:generic/libheif@1.23.6",
+      "description": "HEIC/HEIF container parsing",
+      "licenses": [
+        {
+          "license": {
+            "id": "LGPL-3.0-or-later"
+          }
+        }
+      ],
+      "copyright": "Copyright (c) 2017-2020 Struktur AG; Copyright (c) 2017-2026 Dirk Farin",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/strukturag/libheif/releases/download/v1.23.6/libheif-1.23.6.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "pillow-heif"
+        }
+      ],
+      "cpe": "cpe:2.3:a:struktur:libheif:1.23.6:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:libde265",
+      "name": "libde265",
+      "version": "1.1.3",
+      "purl": "pkg:generic/libde265@1.1.3",
+      "description": "HEVC picture decoding (HEIC)",
+      "licenses": [
+        {
+          "license": {
+            "id": "LGPL-3.0-or-later"
+          }
+        }
+      ],
+      "copyright": "Copyright (c) 2013-2014 Struktur AG; Copyright (c) 2013-2026 Dirk Farin",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/strukturag/libde265/releases/download/v1.1.3/libde265-1.1.3.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "pillow-heif"
+        }
+      ],
+      "cpe": "cpe:2.3:a:struktur:libde265:1.1.3:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:x265",
+      "name": "x265",
+      "version": "4.3",
+      "purl": "pkg:generic/x265@4.3",
+      "description": "HEVC encoder in its own DLL (libx265), imported by the libheif DLL. Never called: Media Reader x removes Pillow's HEIF writer at startup",
+      "licenses": [
+        {
+          "license": {
+            "id": "GPL-2.0-or-later"
+          }
+        }
+      ],
+      "copyright": "Copyright (C) 2013-2020 MulticoreWare, Inc",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/Multicorewareinc/x265/releases/download/4.3/x265_4.3.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "pillow-heif"
+        },
+        {
+          "name": "mediareaderx:build",
+          "value": "4.3+1-e9b8812"
+        }
+      ],
+      "cpe": "cpe:2.3:a:multicorewareinc:x265:4.3:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:gcc-runtime",
+      "name": "gcc-runtime",
+      "version": "16.2.0",
+      "purl": "pkg:generic/gcc-runtime@16.2.0",
+      "description": "libgcc_s_seh-1.dll and libstdc++-6.dll (MSYS2 GCC), the C and C++ runtime of the HEIF DLLs",
+      "licenses": [
+        {
+          "expression": "GPL-3.0-or-later WITH GCC-exception-3.1"
+        }
+      ],
+      "copyright": "Copyright (C) Free Software Foundation, Inc.",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://ftp.gnu.org/gnu/gcc/gcc-16.2.0/gcc-16.2.0.tar.xz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "pillow-heif"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:libjpeg-turbo",
+      "name": "libjpeg-turbo",
+      "version": "3.2.0",
+      "purl": "pkg:generic/libjpeg-turbo@3.2.0",
+      "description": "JPEG decoding",
+      "licenses": [
+        {
+          "expression": "IJG AND BSD-3-Clause AND Zlib"
+        }
+      ],
+      "copyright": "Copyright (C) 2009-2026 D. R. Commander and others; copyright (C) 1991-2020 Thomas G. Lane, Guido Vollbeding. Based in part on the work of the Independent JPEG Group",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "pillow"
+        },
+        {
+          "name": "mediareaderx:alternative-cpe",
+          "value": "cpe:2.3:a:d.r.commander:libjpeg-turbo:3.2.0:*:*:*:*:*:*:*"
+        }
+      ],
+      "cpe": "cpe:2.3:a:libjpeg-turbo:libjpeg-turbo:3.2.0:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:libwebp",
+      "name": "libwebp",
+      "version": "1.6.0",
+      "purl": "pkg:generic/libwebp@1.6.0",
+      "description": "WebP decoding",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "copyright": "Copyright (c) 2010, Google Inc.",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/webmproject/libwebp/archive/refs/tags/v1.6.0.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "pillow"
+        }
+      ],
+      "cpe": "cpe:2.3:a:webmproject:libwebp:1.6.0:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:libavif",
+      "name": "libavif",
+      "version": "1.4.2",
+      "purl": "pkg:generic/libavif@1.4.2",
+      "description": "AVIF container parsing",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-2-Clause"
+          }
+        }
+      ],
+      "copyright": "Copyright 2019 Joe Drago",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/AOMediaCodec/libavif/archive/refs/tags/v1.4.2.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "pillow"
+        }
+      ],
+      "cpe": "cpe:2.3:a:aomedia:libavif:1.4.2:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:dav1d",
+      "name": "dav1d",
+      "version": "1.5.3",
+      "purl": "pkg:generic/dav1d@1.5.3",
+      "description": "AV1 picture decoding (AVIF)",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-2-Clause"
+          }
+        }
+      ],
+      "copyright": "Copyright (c) 2018-2025, VideoLAN and dav1d authors",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/videolan/dav1d/archive/refs/tags/1.5.3.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "pillow"
+        }
+      ],
+      "cpe": "cpe:2.3:a:videolan:dav1d:1.5.3:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:libaom",
+      "name": "libaom",
+      "version": "3.14.1",
+      "purl": "pkg:generic/libaom@3.14.1",
+      "description": "AV1 encoder in the AVIF module; never called by Media Reader x",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-2-Clause"
+          }
+        }
+      ],
+      "copyright": "Copyright (c) 2016, Alliance for Open Media",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://storage.googleapis.com/aom-releases/libaom-3.14.1.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "pillow"
+        }
+      ],
+      "cpe": "cpe:2.3:a:aomedia:aomedia:3.14.1:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:libtiff",
+      "name": "libtiff",
+      "version": "4.7.2",
+      "purl": "pkg:generic/libtiff@4.7.2",
+      "description": "TIFF decoding, RAW EXIF",
+      "licenses": [
+        {
+          "license": {
+            "id": "libtiff"
+          }
+        }
+      ],
+      "copyright": "Copyright (c) 1988-1997 Sam Leffler; Copyright (c) 1991-1997 Silicon Graphics, Inc.",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://download.osgeo.org/libtiff/tiff-4.7.2.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "pillow"
+        }
+      ],
+      "cpe": "cpe:2.3:a:libtiff:libtiff:4.7.2:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:lcms2",
+      "name": "lcms2",
+      "version": "2.19",
+      "purl": "pkg:generic/lcms2@2.19",
+      "description": "colour profiles",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "copyright": "Copyright (c) 1998-2023 Marti Maria Saguer",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/mm2/Little-CMS/archive/refs/tags/lcms2.19.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "pillow"
+        }
+      ],
+      "cpe": "cpe:2.3:a:littlecms:little_cms_color_engine:2.19:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:freetype",
+      "name": "freetype",
+      "version": "2.14.3",
+      "purl": "pkg:generic/freetype@2.14.3",
+      "description": "linked, unused by the app",
+      "licenses": [
+        {
+          "expression": "FTL OR GPL-2.0-or-later"
+        }
+      ],
+      "copyright": "Copyright (C) 1996-2002, 2006 David Turner, Robert Wilhelm, and Werner Lemberg",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://download.savannah.gnu.org/releases/freetype/freetype-2.14.3.tar.xz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "pillow"
+        }
+      ],
+      "cpe": "cpe:2.3:a:freetype:freetype:2.14.3:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:openjpeg",
+      "name": "openjpeg",
+      "version": "2.5.4",
+      "purl": "pkg:generic/openjpeg@2.5.4",
+      "description": "linked; unreachable (JPEG 2000 is not a supported format)",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-2-Clause"
+          }
+        }
+      ],
+      "copyright": "Copyright (c) 2002-2014, Universite catholique de Louvain (UCL), Belgium, and others",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/uclouvain/openjpeg/archive/refs/tags/v2.5.4.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "pillow"
+        }
+      ],
+      "cpe": "cpe:2.3:a:uclouvain:openjpeg:2.5.4:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:zlib-ng",
+      "name": "zlib-ng",
+      "version": "2.3.3",
+      "purl": "pkg:generic/zlib-ng@2.3.3",
+      "description": "PNG and TIFF inflate (no CPE exists in NVD)",
+      "licenses": [
+        {
+          "license": {
+            "id": "Zlib"
+          }
+        }
+      ],
+      "copyright": "(C) 1995-2024 Jean-loup Gailly and Mark Adler; zlib-ng contributors",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/zlib-ng/zlib-ng/archive/refs/tags/2.3.3.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "pillow"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:libjxl",
+      "name": "libjxl",
+      "version": "0.12.0",
+      "purl": "pkg:generic/libjxl@0.12.0",
+      "description": "JPEG XL decoding",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "copyright": "Copyright (c) the JPEG XL Project Authors",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/libjxl/libjxl/archive/refs/tags/v0.12.0.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "imagecodecs"
+        },
+        {
+          "name": "mediareaderx:also-contains",
+          "value": "highway (Apache-2.0 OR BSD-3-Clause), a copy of lcms2 (versions not exposed)"
+        }
+      ],
+      "cpe": "cpe:2.3:a:libjxl_project:libjxl:0.12.0:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:brotli",
+      "name": "brotli",
+      "version": "1.2.0",
+      "purl": "pkg:generic/brotli@1.2.0",
+      "description": "used by libjxl; version from the same imagecodecs build",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "copyright": "Copyright (c) 2009, 2010, 2013-2016 by the Brotli Authors",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/google/brotli/archive/refs/tags/v1.2.0.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "imagecodecs"
+        }
+      ],
+      "cpe": "cpe:2.3:a:google:brotli:1.2.0:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:libraw",
+      "name": "libraw",
+      "version": "0.22.2",
+      "purl": "pkg:generic/libraw@0.22.2",
+      "description": "camera RAW decoding (raw_r.dll)",
+      "licenses": [
+        {
+          "expression": "LGPL-2.1-only OR CDDL-1.0"
+        }
+      ],
+      "copyright": "Copyright (C) 2008-2025 LibRaw LLC; Copyright 1997-2018 Dave Coffin",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/LibRaw/LibRaw/archive/refs/tags/0.22.2.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "rawpy"
+        }
+      ],
+      "cpe": "cpe:2.3:a:libraw:libraw:0.22.2:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:zlib-rawpy",
+      "name": "zlib",
+      "version": "1.3.2",
+      "purl": "pkg:generic/zlib@1.3.2",
+      "description": "inside raw_r.dll (compressed DNG)",
+      "licenses": [
+        {
+          "license": {
+            "id": "Zlib"
+          }
+        }
+      ],
+      "copyright": "Copyright (C) Jean-loup Gailly and Mark Adler",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/madler/zlib/releases/download/v1.3.2/zlib-1.3.2.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "rawpy"
+        }
+      ],
+      "cpe": "cpe:2.3:a:zlib:zlib:1.3.2:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:qt",
+      "name": "qt",
+      "version": "6.12.0",
+      "purl": "pkg:generic/qt@6.12.0",
+      "description": "GUI, SVG rendering, multimedia",
+      "licenses": [
+        {
+          "expression": "LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only"
+        }
+      ],
+      "copyright": "Copyright (C) The Qt Company Ltd. and other contributors",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://download.qt.io/official_releases/qt/6.12/6.12.0/single/qt-everywhere-src-6.12.0.tar.xz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "PySide6-Essentials"
+        }
+      ],
+      "cpe": "cpe:2.3:a:qt:qt:6.12.0:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:ffmpeg",
+      "name": "ffmpeg",
+      "version": "9.0.1",
+      "purl": "pkg:generic/ffmpeg@9.0.1",
+      "description": "video demuxing and decoding (Qt Multimedia)",
+      "licenses": [
+        {
+          "license": {
+            "id": "LGPL-2.1-or-later"
+          }
+        }
+      ],
+      "copyright": "Copyright (C) the FFmpeg developers",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://ffmpeg.org/releases/ffmpeg-9.0.1.tar.xz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "PySide6-Addons"
+        },
+        {
+          "name": "mediareaderx:configure",
+          "value": "--prefix=/c/FFmpeg-n9.0.1/build/msvc/installed --disable-programs --disable-doc --disable-debug --enable-network --disable-lzma --enable-pic --disable-vulkan --disable-v4l2-m2m --disable-decoder=truemotion1 --disable-avdevice --disable-avfilter --enable-zlib --extra-cflags='-IC:/zlib-1.3.1/build/amd64' --extra-ldflags='-LIBPATH:C:/zlib-1.3.1/build/amd64' --toolchain=msvc --enable-shared --disable-static"
+        }
+      ],
+      "cpe": "cpe:2.3:a:ffmpeg:ffmpeg:9.0.1:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:libjpeg-turbo-qt",
+      "name": "libjpeg-turbo",
+      "version": "3.2.0",
+      "purl": "pkg:generic/libjpeg-turbo@3.2.0",
+      "description": "Qt JPEG plugin (JPEG pictures inside SVG files)",
+      "licenses": [
+        {
+          "expression": "IJG AND BSD-3-Clause AND Zlib"
+        }
+      ],
+      "copyright": "Copyright (C) 2009-2026 D. R. Commander and others; copyright (C) 1991-2020 Thomas G. Lane, Guido Vollbeding. Based in part on the work of the Independent JPEG Group",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://download.qt.io/official_releases/qt/6.12/6.12.0/single/qt-everywhere-src-6.12.0.tar.xz",
+          "comment": "qtbase/src/3rdparty/libjpeg"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "PySide6-Essentials"
+        },
+        {
+          "name": "mediareaderx:alternative-cpe",
+          "value": "cpe:2.3:a:d.r.commander:libjpeg-turbo:3.2.0:*:*:*:*:*:*:*"
+        }
+      ],
+      "cpe": "cpe:2.3:a:libjpeg-turbo:libjpeg-turbo:3.2.0:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:zlib-ffmpeg",
+      "name": "zlib",
+      "version": "1.3.1",
+      "purl": "pkg:generic/zlib@1.3.1",
+      "description": "inside FFmpeg (compressed MP4/MKV headers, PNG in video)",
+      "licenses": [
+        {
+          "license": {
+            "id": "Zlib"
+          }
+        }
+      ],
+      "copyright": "Copyright (C) Jean-loup Gailly and Mark Adler",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "PySide6-Addons"
+        }
+      ],
+      "cpe": "cpe:2.3:a:zlib:zlib:1.3.1:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:libpng-qt",
+      "name": "libpng",
+      "version": "1.6.58",
+      "purl": "pkg:generic/libpng@1.6.58",
+      "description": "Qt6Gui.dll (PNG pictures inside SVG files, icons)",
+      "licenses": [
+        {
+          "license": {
+            "id": "libpng-2.0"
+          }
+        }
+      ],
+      "copyright": "Copyright (c) 1995-2026 The PNG Reference Library Authors",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://download.qt.io/official_releases/qt/6.12/6.12.0/single/qt-everywhere-src-6.12.0.tar.xz",
+          "comment": "qtbase/src/3rdparty"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "PySide6-Essentials"
+        },
+        {
+          "name": "mediareaderx:version-source",
+          "value": "declared from Qt 6.12.0 attribution (https://code.qt.io/cgit/qt/qtbase.git/tree/src/3rdparty?h=v6.12.0)"
+        }
+      ],
+      "cpe": "cpe:2.3:a:libpng:libpng:1.6.58:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:freetype-qt",
+      "name": "freetype",
+      "version": "2.14.3",
+      "purl": "pkg:generic/freetype@2.14.3",
+      "description": "Qt6Gui.dll (text rendering)",
+      "licenses": [
+        {
+          "expression": "FTL OR GPL-2.0-or-later"
+        }
+      ],
+      "copyright": "Copyright (C) 1996-2002, 2006 David Turner, Robert Wilhelm, and Werner Lemberg",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://download.qt.io/official_releases/qt/6.12/6.12.0/single/qt-everywhere-src-6.12.0.tar.xz",
+          "comment": "qtbase/src/3rdparty"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "PySide6-Essentials"
+        },
+        {
+          "name": "mediareaderx:version-source",
+          "value": "declared from Qt 6.12.0 attribution (https://code.qt.io/cgit/qt/qtbase.git/tree/src/3rdparty?h=v6.12.0)"
+        }
+      ],
+      "cpe": "cpe:2.3:a:freetype:freetype:2.14.3:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:harfbuzz-qt",
+      "name": "harfbuzz",
+      "version": "14.5.0",
+      "purl": "pkg:generic/harfbuzz@14.5.0",
+      "description": "Qt6Gui.dll (text shaping)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT-Modern-Variant"
+          }
+        }
+      ],
+      "copyright": "Copyright (C) 2010-2022 Google, Inc., and the other HarfBuzz authors",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://download.qt.io/official_releases/qt/6.12/6.12.0/single/qt-everywhere-src-6.12.0.tar.xz",
+          "comment": "qtbase/src/3rdparty"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "PySide6-Essentials"
+        },
+        {
+          "name": "mediareaderx:version-source",
+          "value": "declared from Qt 6.12.0 attribution (https://code.qt.io/cgit/qt/qtbase.git/tree/src/3rdparty?h=v6.12.0)"
+        }
+      ],
+      "cpe": "cpe:2.3:a:harfbuzz_project:harfbuzz:14.5.0:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:zlib-qt",
+      "name": "zlib",
+      "version": "1.3.2",
+      "purl": "pkg:generic/zlib@1.3.2",
+      "description": "Qt6Core.dll (SVGZ, PNG)",
+      "licenses": [
+        {
+          "license": {
+            "id": "Zlib"
+          }
+        }
+      ],
+      "copyright": "Copyright (C) Jean-loup Gailly and Mark Adler",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://download.qt.io/official_releases/qt/6.12/6.12.0/single/qt-everywhere-src-6.12.0.tar.xz",
+          "comment": "qtbase/src/3rdparty"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "PySide6-Essentials"
+        },
+        {
+          "name": "mediareaderx:version-source",
+          "value": "declared from Qt 6.12.0 attribution (https://code.qt.io/cgit/qt/qtbase.git/tree/src/3rdparty?h=v6.12.0)"
+        }
+      ],
+      "cpe": "cpe:2.3:a:zlib:zlib:1.3.2:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:cpython",
+      "name": "cpython",
+      "version": "3.14.10",
+      "purl": "pkg:generic/cpython@3.14.10",
+      "description": "Python runtime; also contains libffi, xz, bzip2 (versions follow the CPython release)",
+      "licenses": [
+        {
+          "license": {
+            "id": "PSF-2.0"
+          }
+        }
+      ],
+      "copyright": "Copyright (c) 2001 Python Software Foundation. All Rights Reserved.",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://www.python.org/ftp/python/3.14.10/Python-3.14.10.tar.xz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "Python runtime"
+        }
+      ],
+      "cpe": "cpe:2.3:a:python:python:3.14.10:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:libexpat",
+      "name": "libexpat",
+      "version": "2.9.0",
+      "purl": "pkg:generic/libexpat@2.9.0",
+      "description": "XML parser in CPython (pyexpat)",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "copyright": "Copyright (c) 1998-2000 Thai Open Source Software Center Ltd and Clark Cooper; Copyright (c) 2001 and later, Expat maintainers",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/libexpat/libexpat/releases/download/R_2_9_0/expat-2.9.0.tar.xz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "Python runtime"
+        }
+      ],
+      "cpe": "cpe:2.3:a:libexpat_project:libexpat:2.9.0:*:*:*:*:*:*:*"
+    },
+    {
+      "type": "library",
+      "bom-ref": "native:openblas",
+      "name": "openblas",
+      "version": "0.3.34",
+      "purl": "pkg:generic/openblas@0.3.34",
+      "description": "linear algebra in numpy; not reached by file content",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "copyright": "Copyright (c) 2011-2014, The OpenBLAS Project",
+      "externalReferences": [
+        {
+          "type": "source-distribution",
+          "url": "https://github.com/OpenMathLib/OpenBLAS/releases/download/v0.3.34/OpenBLAS-0.3.34.tar.gz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "mediareaderx:bundled-by",
+          "value": "numpy"
+        },
+        {
+          "name": "mediareaderx:build",
+          "value": "0.3.34.106.0"
+        }
+      ],
+      "cpe": "cpe:2.3:a:openblas_project:openblas:0.3.34:*:*:*:*:*:*:*"
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "requirements-L10",
+      "dependsOn": [
+        "native:openblas"
+      ]
+    },
+    {
+      "ref": "requirements-L11"
+    },
+    {
+      "ref": "requirements-L12"
+    },
+    {
+      "ref": "requirements-L3",
+      "dependsOn": [
+        "native:qt",
+        "native:libjpeg-turbo-qt",
+        "native:libpng-qt",
+        "native:freetype-qt",
+        "native:harfbuzz-qt",
+        "native:zlib-qt"
+      ]
+    },
+    {
+      "ref": "requirements-L4",
+      "dependsOn": [
+        "native:ffmpeg",
+        "native:zlib-ffmpeg"
+      ]
+    },
+    {
+      "ref": "requirements-L5"
+    },
+    {
+      "ref": "requirements-L6",
+      "dependsOn": [
+        "native:libjpeg-turbo",
+        "native:libwebp",
+        "native:libavif",
+        "native:dav1d",
+        "native:libaom",
+        "native:libtiff",
+        "native:lcms2",
+        "native:freetype",
+        "native:openjpeg",
+        "native:zlib-ng"
+      ]
+    },
+    {
+      "ref": "requirements-L7",
+      "dependsOn": [
+        "native:libheif",
+        "native:libde265",
+        "native:x265",
+        "native:gcc-runtime"
+      ]
+    },
+    {
+      "ref": "requirements-L8",
+      "dependsOn": [
+        "native:libjxl",
+        "native:brotli"
+      ]
+    },
+    {
+      "ref": "requirements-L9",
+      "dependsOn": [
+        "native:libraw",
+        "native:zlib-rawpy"
+      ]
+    },
+    {
+      "ref": "native:libheif"
+    },
+    {
+      "ref": "native:libde265"
+    },
+    {
+      "ref": "native:x265"
+    },
+    {
+      "ref": "native:gcc-runtime"
+    },
+    {
+      "ref": "native:libjpeg-turbo"
+    },
+    {
+      "ref": "native:libwebp"
+    },
+    {
+      "ref": "native:libavif"
+    },
+    {
+      "ref": "native:dav1d"
+    },
+    {
+      "ref": "native:libaom"
+    },
+    {
+      "ref": "native:libtiff"
+    },
+    {
+      "ref": "native:lcms2"
+    },
+    {
+      "ref": "native:freetype"
+    },
+    {
+      "ref": "native:openjpeg"
+    },
+    {
+      "ref": "native:zlib-ng"
+    },
+    {
+      "ref": "native:libjxl"
+    },
+    {
+      "ref": "native:brotli"
+    },
+    {
+      "ref": "native:libraw"
+    },
+    {
+      "ref": "native:zlib-rawpy"
+    },
+    {
+      "ref": "native:qt"
+    },
+    {
+      "ref": "native:ffmpeg"
+    },
+    {
+      "ref": "native:libjpeg-turbo-qt"
+    },
+    {
+      "ref": "native:zlib-ffmpeg"
+    },
+    {
+      "ref": "native:libpng-qt"
+    },
+    {
+      "ref": "native:freetype-qt"
+    },
+    {
+      "ref": "native:harfbuzz-qt"
+    },
+    {
+      "ref": "native:zlib-qt"
+    },
+    {
+      "ref": "native:cpython"
+    },
+    {
+      "ref": "native:libexpat"
+    },
+    {
+      "ref": "native:openblas"
+    }
+  ],
+  "metadata": {
+    "timestamp": "2026-11-06T06:21:23.476820+00:00",
+    "tools": {
+      "components": [
+        {
+          "description": "CycloneDX Software Bill of Materials (SBOM) generator for Python projects and environments",
+          "externalReferences": [
+            {
+              "type": "build-system",
+              "url": "https://github.com/CycloneDX/cyclonedx-python/actions"
+            },
+            {
+              "type": "distribution",
+              "url": "https://pypi.org/project/cyclonedx-bom/"
+            },
+            {
+              "type": "documentation",
+              "url": "https://cyclonedx-bom-tool.readthedocs.io/"
+            },
+            {
+              "type": "issue-tracker",
+              "url": "https://github.com/CycloneDX/cyclonedx-python/issues"
+            },
+            {
+              "type": "license",
+              "url": "https://github.com/CycloneDX/cyclonedx-python/blob/main/LICENSE"
+            },
+            {
+              "type": "release-notes",
+              "url": "https://github.com/CycloneDX/cyclonedx-python/blob/main/CHANGELOG.md"
+            },
+            {
+              "type": "vcs",
+              "url": "https://github.com/CycloneDX/cyclonedx-python/"
+            },
+            {
+              "type": "website",
+              "url": "https://github.com/CycloneDX/cyclonedx-python/#readme"
+            }
+          ],
+          "group": "CycloneDX",
+          "licenses": [
+            {
+              "license": {
+                "acknowledgement": "declared",
+                "id": "Apache-2.0"
+              }
+            }
+          ],
+          "name": "cyclonedx-py",
+          "type": "application",
+          "version": "7.5.0"
+        },
+        {
+          "description": "Python library for CycloneDX",
+          "externalReferences": [
+            {
+              "type": "build-system",
+              "url": "https://github.com/CycloneDX/cyclonedx-python-lib/actions"
+            },
+            {
+              "type": "distribution",
+              "url": "https://pypi.org/project/cyclonedx-python-lib/"
+            },
+            {
+              "type": "documentation",
+              "url": "https://cyclonedx-python-library.readthedocs.io/"
+            },
+            {
+              "type": "issue-tracker",
+              "url": "https://github.com/CycloneDX/cyclonedx-python-lib/issues"
+            },
+            {
+              "type": "license",
+              "url": "https://github.com/CycloneDX/cyclonedx-python-lib/blob/main/LICENSE"
+            },
+            {
+              "type": "release-notes",
+              "url": "https://github.com/CycloneDX/cyclonedx-python-lib/blob/main/CHANGELOG.md"
+            },
+            {
+              "type": "vcs",
+              "url": "https://github.com/CycloneDX/cyclonedx-python-lib"
+            },
+            {
+              "type": "website",
+              "url": "https://github.com/CycloneDX/cyclonedx-python-lib/#readme"
+            }
+          ],
+          "group": "CycloneDX",
+          "licenses": [
+            {
+              "license": {
+                "acknowledgement": "declared",
+                "id": "Apache-2.0"
+              }
+            }
+          ],
+          "name": "cyclonedx-python-lib",
+          "type": "library",
+          "version": "11.12.0"
+        }
+      ]
+    }
+  },
+  "serialNumber": "urn:uuid:72328231-4de1-4515-a1b3-441fcb6c168e",
+  "version": 1,
+  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6"
+}

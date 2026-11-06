@@ -73,7 +73,19 @@ if ($SkipAudit) {
     Step 'Vulnerability audit (pip-audit, grype)'
     # Pinned files only: --disable-pip --no-deps audits exactly what ships, without resolving or downloading.
     foreach ($req in @("$Root\requirements.txt", "$Root\requirements-dev.txt")) {
-        Invoke-Checked $Py @('-m', 'pip_audit', '--disable-pip', '--no-deps', '--strict', '--progress-spinner', 'off', '-r', $req)
+        $audit = @('-m', 'pip_audit', '--disable-pip', '--no-deps', '--strict', '--progress-spinner', 'off', '-r', $req)
+        if ($env:GITHUB_ACTIONS -eq 'true') {
+            # GitHub logs are public: write the findings to a file and print counts only (SECURITY.md).
+            $out = "$Root\build\security\pip-audit-$([IO.Path]::GetFileNameWithoutExtension($req)).json"
+            & $Py @audit '-f' 'json' '-o' $out
+            if ($LASTEXITCODE -ne 0) {
+                $n = 'an unknown number of'
+                if (Test-Path $out) { $n = @((Get-Content $out -Raw | ConvertFrom-Json).dependencies | ForEach-Object { $_.vulns } | Where-Object { $_ }).Count }
+                throw "pip-audit failed for $(Split-Path $req -Leaf) with $n known vulnerabilities. Details are not printed in public logs: run build.ps1 locally."
+            }
+        } else {
+            Invoke-Checked $Py $audit
+        }
     }
     Invoke-Checked $Py @("$Root\tools\vuln_scan.py", $Sbom, "$Root\build\security")
 }

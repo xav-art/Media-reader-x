@@ -1,0 +1,30 @@
+name: Install grype
+description: >
+  Downloads grype for Windows from its GitHub release, refuses the zip unless its SHA-256 equals the pinned
+  one, and sets GRYPE for tools/vuln_scan.py. Dependabot cannot update this pin: change version and sha256
+  together (sha256 from the release's checksums file), in step with the local install (SECURITY.md).
+  If the scan reports a scanner error twice, update the pin first.
+inputs:
+  version:
+    description: grype version without the leading v
+    default: "0.121.1"
+  sha256:
+    description: SHA-256 of grype_<version>_windows_amd64.zip
+    default: "37f7b1b9c7d93a74174c5619ee16b321fc135670509f234235fdf2dc5f2c0852"
+runs:
+  using: composite
+  steps:
+    - name: Download and check grype
+      shell: pwsh
+      env:
+        GRYPE_VERSION: ${{ inputs.version }}
+        GRYPE_SHA256: ${{ inputs.sha256 }}
+      run: |
+        $v = $env:GRYPE_VERSION
+        $zip = Join-Path $env:RUNNER_TEMP "grype_${v}_windows_amd64.zip"
+        $dir = Join-Path $env:RUNNER_TEMP 'grype'
+        Invoke-WebRequest "https://github.com/anchore/grype/releases/download/v$v/grype_${v}_windows_amd64.zip" -OutFile $zip
+        $got = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+        if ($got -ne $env:GRYPE_SHA256.ToLower()) { throw "grype zip SHA-256 $got differs from the pinned $env:GRYPE_SHA256" }
+        Expand-Archive $zip -DestinationPath $dir -Force
+        "GRYPE=$(Join-Path $dir 'grype.exe')" >> $env:GITHUB_ENV

@@ -1,0 +1,100 @@
+# Full build on every push, pull request (including Dependabot's) and v* tag: tests, SBOM, vulnerability
+# audit, frozen self-test, installer. A v* tag also creates a DRAFT GitHub release: nothing is public until
+# the owner checks it and presses Publish. Only the release job can write to the repo.
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check the tag against __version__ and the shipped SBOM (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          v=$(grep -m1 '^__version__ = ' src/mediareaderx/__init__.py | cut -d'"' -f2)
+          if [ "$TAG" != "v$v" ]; then echo "::error::Tag $TAG does not match __version__ $v"; exit 1; fi
+          if [ ! -f "packaging/shipped/MediaReaderX-$v-sbom.cdx.json" ]; then
+            echo "::error::packaging/shipped has no SBOM for $v: copy it from dist before tagging (SECURITY.md)"; exit 1
+          fi
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.14"
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --version 6.7.1 -y --no-progress
+          }
+
+      - name: Install grype (checksum checked)
+        uses: ./.github/actions/install-grype
+
+      - name: Build, test and package
+        shell: pwsh
+        run: |
+          $env:MRX_PYTHON = (Get-Command python).Source  # setup-python's 3.14, not the per-user default path
+          ./build.ps1
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: MediaReaderX-dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write  # create the draft release
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: MediaReaderX-dist
+          path: dist
+
+      # Release assets are flat files: the MSYS2 build scripts (two are called PKGBUILD) go in one zip.
+      - name: Pack the MSYS2 build scripts
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          test -d dist/source/msys2
+          (cd dist/source && zip -qr "../MediaReaderX-${TAG#v}-msys2-build-scripts.zip" msys2)
+
+      - name: Create the draft release
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3  # v3.0.4
+        with:
+          draft: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.exe
+            dist/*.zip
+            dist/*.json
+            dist/*.txt
+            dist/source/*.tar.gz
+            dist/source/SOURCES.txt
