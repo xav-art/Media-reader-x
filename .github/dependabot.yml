@@ -1,0 +1,30 @@
+# Update PRs on the 1st and 15th of each month, the same days as the security scan. Every PR runs the full
+# build (build.yml). Bumps of PySide6 or of a library in packaging/sources.json need manual steps on the PR
+# branch before they turn green: see "Dependabot pull requests" in SECURITY.md.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: cron
+      cronjob: "0 5 1,15 * *"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+    groups:
+      qt:  # PySide6-Essentials, PySide6-Addons and shiboken6 must move together
+        patterns: ["PySide6*", "pyside6*", "shiboken6"]
+      minor-and-patch:  # pillow-heif and rawpy need manual steps (SECURITY.md): their own PRs
+        update-types: ["minor", "patch"]
+        exclude-patterns: ["pillow-heif", "pillow_heif", "rawpy"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: cron
+      cronjob: "0 5 1,15 * *"
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ["*"]
