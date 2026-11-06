@@ -130,7 +130,7 @@ def broken_pool(monkeypatch):
     pool = sandbox._Pool()
     pool.state = "new"
 
-    def fail(_role):
+    def fail(_role, *_args):
         raise OSError("blocked by policy")
 
     monkeypatch.setattr(pool, "_spawn", fail)
@@ -139,8 +139,14 @@ def broken_pool(monkeypatch):
 
 
 def test_never_worked_falls_back_to_this_process(broken_pool, samples, qapp):
+    import threading
+
     broken_pool.worked_before = False
-    image = sandbox.decode(samples / "sample.png")
+    result = {}
+    worker = threading.Thread(target=lambda: result.update(image=sandbox.decode(samples / "sample.png")))
+    worker.start()  # off the window thread: there the first start gets the full time and two tries
+    worker.join()
+    image = result["image"]
     assert image.size.width() == 320 and sandbox.state() == "fallback" and sandbox.in_process()
 
 
@@ -172,7 +178,7 @@ def test_helper_is_contained(qapp, tmp_path):
     secret = tmp_path / "secret.txt"
     secret.write_text("private", encoding="utf-8")
     assert sandbox.selfcheck(secret) == {"read": "blocked", "network": "blocked", "process": "blocked",
-                                         "screen": "blocked"}
+                                         "screen": "blocked", "user_desktop": "blocked"}
 
 
 @windows
@@ -262,7 +268,7 @@ def test_a_working_session_fails_closed(monkeypatch, samples, qapp):
     pool.state, pool.worked_before = "new", False
     monkeypatch.setattr(sandbox, "_pool", pool)
     pool._set_state("on")  # a helper worked in this session
-    monkeypatch.setattr(pool, "_spawn", lambda role: (_ for _ in ()).throw(OSError("blocked")))
+    monkeypatch.setattr(pool, "_spawn", lambda role, *a: (_ for _ in ()).throw(OSError("blocked")))
     with pytest.raises(DecodeError):
         sandbox.decode(samples / "sample.png")
     assert sandbox.state() == "failed"
@@ -273,19 +279,17 @@ def test_all_slots_taken_waits_and_is_not_a_failure(monkeypatch, samples, qapp):
     pool.state = "new"
     monkeypatch.setattr(sandbox, "_pool", pool)
     monkeypatch.setattr(sandbox, "ACQUIRE_WAIT_S", 1)
-    monkeypatch.setattr(pool, "_spawn", lambda role: (_ for _ in ()).throw(sandbox.NoSlot("taken")))
+    monkeypatch.setattr(pool, "_spawn", lambda role, *a: (_ for _ in ()).throw(sandbox.NoSlot("taken")))
     with pytest.raises(DecodeError, match="busy"):
         sandbox.decode(samples / "sample.png")
     assert sandbox.state() == "new"
 
 
-CLAIM = "Local" + chr(92) + "xav-art.MediaReaderX.Test.Claim"
-
-
 @windows
-def test_slot_claims_are_exclusive():
+def test_slot_claims_are_exclusive(tmp_path):
     from mediareaderx.sandbox import winapi
 
+    CLAIM = tmp_path / "slots" / "0.lock"  # noqa: N806
     first = winapi.claim_slot(CLAIM)
     assert first is not None
     assert winapi.claim_slot(CLAIM) is None
@@ -293,6 +297,7 @@ def test_slot_claims_are_exclusive():
     again = winapi.claim_slot(CLAIM)
     assert again is not None
     winapi.close(again)
+    assert not CLAIM.exists()  # the lock file goes with the handle
 
 
 def test_a_refusal_from_the_helper_keeps_its_reason(monkeypatch, samples, qapp):
@@ -317,3 +322,161 @@ def test_fallback_never_follows_a_working_helper():
 def test_clean_text_removes_c1_and_separators():
     assert protocol.clean_text("a" + chr(0x85) + "b" + chr(0x2028) + "c" + chr(0x61C)) == "a b c "
     assert protocol.clean_text("x" + chr(0x200B) + chr(0xFEFF) + chr(0x2062) + "y") == "x   y"
+
+
+def test_more_than_32_streams_are_refused(tmp_path, qapp):
+    """1.6.0 probed with max_streams=32, so FFmpeg hid stream 33 from the check but not from the player."""
+    import av
+    import numpy as np
+
+    path = tmp_path / "many.mkv"
+    with av.open(str(path), "w") as c:
+        video = c.add_stream("mpeg4", rate=10)
+        video.width, video.height, video.pix_fmt = 32, 16, "yuv420p"
+        audio = [c.add_stream("mp2", rate=48000) for _ in range(33)]
+        for i in range(3):
+            frame = av.VideoFrame.from_ndarray(np.zeros((16, 32, 3), np.uint8), format="rgb24")
+            frame.pts = i
+            for packet in video.encode(frame):
+                c.mux(packet)
+        for packet in video.encode():
+            c.mux(packet)
+        for stream in audio:
+            for packet in stream.encode():
+                c.mux(packet)
+    head = content.read_head(path)
+    size = path.stat().st_size
+    with path.open("rb") as f:
+        found = videoprobe.streams(f, size, content.ffmpeg_demuxer(head, ".mkv", size <= len(head)) or "")
+    assert len(found) > videoprobe.MAX_STREAMS
+    assert "more than 32 streams" in videoprobe.refusal(found)
+    with pytest.raises(content.Refused, match="32 streams"):
+        sandbox.check_video(path)
+
+
+def test_late_streams_are_scanned_for_dynamic_containers():
+    assert videoprobe.scan_bytes_for("mpegts") > 0 and videoprobe.scan_bytes_for("mpeg") > 0
+    assert videoprobe.scan_bytes_for("mov,mp4,m4a,3gp,3g2,mj2") == 0
+
+
+def test_replies_larger_than_asked_are_refused(qapp):
+    header, blobs = _good(frames=[[4000, 1, "rgb32"]], full_size=[8000, 2])  # a screen copy (reduced)
+    parsed, f = _reply(header, [bytes(16000)])
+    with pytest.raises(protocol.ProtocolError, match="larger than asked"):
+        sandbox._read_decoded(parsed, f, max_side=2560)
+    parsed, f = _reply({"ok": True, "frames": [[500, 2, "rgb32"]]}, [bytes(4000)])
+    with pytest.raises(protocol.ProtocolError, match="larger than asked"):
+        sandbox._read_thumb(parsed, f, 192)
+
+
+def test_fallback_thumbnailer_checks_codecs():
+    from mediareaderx import thumbnails
+
+    seen = []
+    thumb = thumbnails.VideoThumbnailer(check=lambda p: seen.append(p))
+    assert thumb._check is not None
+    from mediareaderx import video_thumbs
+
+    assert "check_video_in_process" in open(video_thumbs.__file__, encoding="utf-8").read()
+
+
+def test_helper_notes_never_reach_the_log():
+    """A helper's notes can carry text from the file (or what a taken-over helper saw): only their count is logged."""
+    source = Path(sandbox.__file__).read_text(encoding="utf-8")
+    assert '"Decoder: %s"' not in source and "Decoder warnings: %d" in source
+
+
+# -- 1.6.1 correctness review ----------------------------------------------------------------------------
+@windows
+def test_large_svg_opens_as_a_screen_copy_request(tmp_path, qapp):
+    """1.6.1 first rejected any SVG rendered wider than the screen copy size (SVG ignores max_side)."""
+    path = tmp_path / "wide.svg"
+    path.write_text('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 800"><rect width="1000" height="800" '
+                    'fill="#2a6"/></svg>', encoding="utf-8")
+    image = sandbox.decode(path, 1920)
+    assert image.frames[0].width() == 2000
+
+
+def test_one_failed_start_keeps_working_helpers(monkeypatch):
+    pool = sandbox._Pool()
+    pool.state = "on"
+
+    class Live:
+        proc = 1
+
+    pool.helpers.append(Live())
+    pool._start_failed(OSError("one slow start"))
+    assert pool.state == "on"
+    pool.helpers.clear()
+    pool._start_failed(OSError("none left"))
+    assert pool.state == "failed"
+
+
+def test_fallback_thumbnailer_is_dropped_when_protection_returns(monkeypatch, qapp):
+    from mediareaderx import video_thumbs
+
+    thumbs = video_thumbs.ProtectedVideoThumbnailer()
+
+    class FakeFallback:
+        _queue = ["a.mp4"]
+        current = None
+
+        def clear(self):
+            pass
+
+        def release(self, path):
+            pass
+
+        def deleteLater(self):
+            pass
+
+        def request(self, path):
+            raise AssertionError("must not be used once protection is on")
+
+    thumbs._fallback = FakeFallback()
+    failed = []
+    thumbs.failed.connect(failed.append)
+    monkeypatch.setattr(sandbox, "in_process", lambda: False)
+    monkeypatch.setattr(thumbs, "_next", lambda: None)
+    thumbs.request("b.mp4")
+    assert thumbs._fallback is None and failed == ["a.mp4"]
+
+
+def test_a_slow_first_start_on_the_window_thread_is_not_a_failure(broken_pool, samples, qapp, monkeypatch):
+    broken_pool.worked_before = False
+    monkeypatch.setattr(broken_pool, "prewarm", lambda *a, **k: None)
+    with pytest.raises(DecodeError, match="busy"):
+        sandbox.decode(samples / "sample.png")
+    assert sandbox.state() == "new"  # the background start decides, not a 25 s wait on the window thread
+
+
+def test_exactly_32_allowed_streams_are_still_analysed(tmp_path, qapp, monkeypatch):
+    """The early (header) check refused only for sure; 32 allowed streams go on to FFmpeg's full analysis."""
+    import av
+    import numpy as np
+
+    path = tmp_path / "thirtytwo.mkv"
+    with av.open(str(path), "w") as c:
+        video = c.add_stream("mpeg4", rate=10)
+        video.width, video.height, video.pix_fmt = 32, 16, "yuv420p"
+        audio = [c.add_stream("mp2", rate=48000) for _ in range(31)]
+        for i in range(3):
+            frame = av.VideoFrame.from_ndarray(np.zeros((16, 32, 3), np.uint8), format="rgb24")
+            frame.pts = i
+            for packet in video.encode(frame):
+                c.mux(packet)
+        for packet in video.encode():
+            c.mux(packet)
+        for stream in audio:
+            for packet in stream.encode():
+                c.mux(packet)
+    calls = []
+    real = videoprobe._ffmpeg()
+    wrapped = dict(real)
+    wrapped["find_info"] = lambda *a: calls.append(1) or real["find_info"](*a)
+    monkeypatch.setattr(videoprobe, "_ffmpeg", lambda: wrapped)
+    head = content.read_head(path)
+    size = path.stat().st_size
+    with path.open("rb") as f:
+        found = videoprobe.streams(f, size, content.ffmpeg_demuxer(head, ".mkv", size <= len(head)) or "")
+    assert len(found) == 32 and calls == [1] and videoprobe.refusal(found) is None

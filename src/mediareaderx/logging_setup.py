@@ -48,7 +48,7 @@ _KEEP_NAME = (".py", ".pyd", ".dll")  # program files in a traceback: their name
 # A quoted path: 'C:\x', "D:/x", '\\server\share', '/x/y', 'file:///x'.
 _QUOTED_PATH = re.compile(r"""(['"])((?:[A-Za-z]:|\\\\|\\|/|file:)[^'"\n]*)\1""")
 # An unquoted path runs to the end of the line: a name can contain spaces, so there is no safe shorter end.
-_BARE_PATH = re.compile(r"(?<![\w])(?:[A-Za-z]:[\\/]|\\\\[^\\\s]|file:/)[^\n]*")
+_BARE_PATH = re.compile(r"(?:(?<![\w])(?:[A-Za-z]:[\\/]|\\\\[^\\\s]|file:/)|(?<![\w:/])//[^/\s]+/)[^\n]*")
 
 
 def redact(text: str) -> str:

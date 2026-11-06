@@ -319,23 +319,99 @@ def grant_read(path: Path, sid) -> None:
 GENERIC_ALL = 0x10000000
 
 
-def private_desktop(name: str, cap) -> int:
-    """A desktop only this user and the helpers can use: nothing on it, so a helper sees no other window and
-    cannot capture the screen. Keep the handle open while helpers run."""
+_CreateWindowStation = _sig(user32, "CreateWindowStationW", HANDLE, wt.LPCWSTR, wt.DWORD, wt.DWORD,
+                           ctypes.POINTER(SECURITY_ATTRIBUTES))
+_GetProcessWindowStation = _sig(user32, "GetProcessWindowStation", HANDLE)
+_SetProcessWindowStation = _sig(user32, "SetProcessWindowStation", wt.BOOL, HANDLE)
+_CloseWindowStation = _sig(user32, "CloseWindowStation", wt.BOOL, HANDLE)
+_GetUserObjectInformation = _sig(user32, "GetUserObjectInformationW", wt.BOOL, HANDLE, ctypes.c_int, ctypes.c_void_p,
+                                 wt.DWORD, ctypes.POINTER(wt.DWORD))
+WINSTA_ALL_ACCESS, UOI_NAME = 0x37F, 2
+READ_CONTROL, WRITE_DAC = 0x20000, 0x40000
+_station_lock = __import__("threading").Lock()
+
+
+_GetSecurityInfo = _sig(advapi, "GetSecurityInfo", wt.DWORD, HANDLE, ctypes.c_int, wt.DWORD, ctypes.c_void_p,
+                       ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p), ctypes.c_void_p,
+                       ctypes.POINTER(ctypes.c_void_p))
+_SetSecurityInfo = _sig(advapi, "SetSecurityInfo", wt.DWORD, HANDLE, ctypes.c_int, wt.DWORD, ctypes.c_void_p,
+                       ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p)
+SE_WINDOW_OBJECT = 7
+
+
+def _grant_object(handle: int, sid, access: int) -> None:
+    """Add an allow entry for ``sid`` to a window station's or desktop's own access list."""
+    dacl, sd = ctypes.c_void_p(), ctypes.c_void_p()
+    err = _GetSecurityInfo(handle, SE_WINDOW_OBJECT, DACL_SECURITY_INFORMATION, None, None, ctypes.byref(dacl),
+                           None, ctypes.byref(sd))
+    if err:
+        raise ctypes.WinError(err, "GetSecurityInfo")
+    new = ctypes.c_void_p()
+    try:
+        entry = EXPLICIT_ACCESS_W(access, GRANT_ACCESS, 0, TRUSTEE_W(None, 0, TRUSTEE_IS_SID,
+                                                                    TRUSTEE_IS_WELL_KNOWN_GROUP,
+                                                                    ctypes.cast(sid, ctypes.c_void_p)))
+        err = _SetEntriesInAcl(1, ctypes.byref(entry), dacl, ctypes.byref(new))
+        if err:
+            raise ctypes.WinError(err, "SetEntriesInAcl")
+        err = _SetSecurityInfo(handle, SE_WINDOW_OBJECT, DACL_SECURITY_INFORMATION, None, None, new, None)
+        if err:
+            raise ctypes.WinError(err, "SetSecurityInfo")
+    finally:
+        _LocalFree(sd)
+        if new.value:
+            _LocalFree(new)
+
+
+def private_station(cap, desktop_name: str) -> tuple[int, int, str]:
+    """An empty desktop for the helpers, outside the user's window station: (station, desktop,
+    "station\\desktop").
+
+    A desktop on WinSta0 is not enough: an AppContainer process may open the interactive desktop
+    (WinSta0\\Default) by name and capture the screen (verified 2026-11-05). From another window station it
+    cannot open WinSta0 at all (access denied, verified). Like Chromium's sandbox, this uses the window station
+    Windows gives an unnamed request: the logon session's service station (shared by every running copy;
+    this PC refuses named ones). The capability gets access to it, and the desktop is this process's own.
+    Creating the desktop needs the station as this process's station for a moment. Keep both handles open
+    while helpers run."""
     sddl = f"D:P(A;;GA;;;{user_sid_string()})(A;;GA;;;{sid_string(cap)})(A;;GA;;;SY)"
     sd = ctypes.c_void_p()
     _check(_ConvertSddl(sddl, 1, ctypes.byref(sd), None), "ConvertStringSecurityDescriptor")
     try:
         sa = SECURITY_ATTRIBUTES(ctypes.sizeof(SECURITY_ATTRIBUTES), sd, False)
-        handle = _CreateDesktop(name, None, None, 0, GENERIC_ALL, ctypes.byref(sa))
-        _check(handle, "CreateDesktop")
-        return handle
+        # Windows' default access list for the station: other programs' sandboxes (Chrome, Edge) use the same one.
+        station = _CreateWindowStation(None, 0, WINSTA_ALL_ACCESS | READ_CONTROL | WRITE_DAC, None)
+        can_grant = bool(station)
+        if not station:  # an existing station may refuse changes to its access list: use it as it is
+            station = _check(_CreateWindowStation(None, 0, WINSTA_ALL_ACCESS, None), "CreateWindowStation")
+        desktop = None
+        try:
+            if can_grant:
+                _grant_object(station, cap, WINSTA_ALL_ACCESS)  # it may exist already, with another access list
+            name = ctypes.create_unicode_buffer(256)
+            _check(_GetUserObjectInformation(station, UOI_NAME, name, ctypes.sizeof(name), None), "station name")
+            with _station_lock:
+                previous = _GetProcessWindowStation()
+                _check(_SetProcessWindowStation(station), "SetProcessWindowStation")
+                try:
+                    desktop = _CreateDesktop(desktop_name, None, None, 0, GENERIC_ALL, ctypes.byref(sa))
+                finally:
+                    # Back at once: the app's windows live on WinSta0.
+                    _check(_SetProcessWindowStation(previous), "restore the window station")
+            _check(desktop, "CreateDesktop")
+        except BaseException:
+            close_station(station, desktop)
+            raise
+        return station, desktop, f"{name.value}\\{desktop_name}"
     finally:
         _LocalFree(sd)
 
 
-def close_desktop(handle: int) -> None:
-    _CloseDesktop(handle)
+def close_station(station: int | None, desktop: int | None) -> None:
+    if desktop:
+        _CloseDesktop(desktop)
+    if station:
+        _CloseWindowStation(station)
 
 
 # -- Jobs ------------------------------------------------------------------------------------------------
@@ -443,20 +519,40 @@ def give_handle(process: int, handle: int) -> int:
 
 
 # -- Slot claims -----------------------------------------------------------------------------------------
-ERROR_ALREADY_EXISTS = 183
-_CreateMutex = _sig(k32, "CreateMutexW", HANDLE, ctypes.c_void_p, wt.BOOL, wt.LPCWSTR)
+ERROR_SHARING_VIOLATION = 32
+FILE_FLAG_DELETE_ON_CLOSE = 0x04000000
+_SHGetKnownFolderPath = _sig(ctypes.WinDLL("shell32"), "SHGetKnownFolderPath", ctypes.c_long, ctypes.c_void_p, wt.DWORD,
+                             HANDLE, ctypes.POINTER(wt.LPWSTR))
 
 
-def claim_slot(name: str) -> int | None:
-    """A per-user lock named ``name`` (a mutex in this logon session): the handle when this process now holds
-    it, None when another running copy already does. The lock lives as long as the handle is open."""
-    handle = _CreateMutex(None, False, name)
-    if not handle:
+class _GUID(ctypes.Structure):
+    _fields_ = [("a", wt.DWORD), ("b", wt.WORD), ("c", wt.WORD), ("d", ctypes.c_ubyte * 8)]
+
+
+def local_appdata() -> Path:
+    """The real %LOCALAPPDATA% of this user, from Windows, not from the environment."""
+    guid = _GUID(0xF1B32785, 0x6FBA, 0x4FCF, (ctypes.c_ubyte * 8)(0x9D, 0x55, 0x7B, 0x8E, 0x7F, 0x15, 0x70, 0x91))
+    out = wt.LPWSTR()
+    _hresult(_SHGetKnownFolderPath(ctypes.byref(guid), 0, None, ctypes.byref(out)), "SHGetKnownFolderPath")
+    try:
+        return Path(out.value)
+    finally:
+        ctypes.windll.ole32.CoTaskMemFree(out)
+
+
+def claim_slot(path: Path) -> int | None:
+    """Hold the lock file ``path`` (in this user's own folder, so no other user can take it first): the handle
+    when this process now holds it, None when another running copy does. Windows deletes the file and frees the
+    lock when the handle closes, also when the process crashes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = _CreateFile(str(path), GENERIC_READ | 0x40000000, 0, None, 4,  # GENERIC_WRITE, no sharing, OPEN_ALWAYS
+                         FILE_FLAG_DELETE_ON_CLOSE, None)
+    if handle and handle != INVALID_HANDLE:
+        return handle
+    err = ctypes.get_last_error()
+    if err in (ERROR_SHARING_VIOLATION, 5):  # held by another copy, or being deleted as its holder closes it
         return None
-    if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
-        _CloseHandle(handle)
-        return None
-    return handle
+    raise ctypes.WinError(err, "slot lock")
 
 
 # -- Processes -------------------------------------------------------------------------------------------
@@ -509,7 +605,7 @@ def launch(container_sid, cap_sid, exe: str, args: list[str], env: dict[str, str
             _check(_UpdateAttr(attrs, 0, attr, value, length, None, None), f"attribute 0x{attr:x}")
         si = STARTUPINFOEXW()
         si.StartupInfo.cb = ctypes.sizeof(STARTUPINFOEXW)
-        desk = ctypes.create_unicode_buffer(f"WinSta0\\{desktop}")
+        desk = ctypes.create_unicode_buffer(desktop)  # "station\\desktop" from private_station
         si.StartupInfo.lpDesktop = ctypes.cast(desk, wt.LPWSTR)
         si.lpAttributeList = ctypes.cast(attrs, ctypes.c_void_p)
         # Windows wants the block sorted by name; it remaps LOCALAPPDATA, TEMP and TMP to the container folder.

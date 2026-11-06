@@ -35,7 +35,15 @@ ALLOWED = {
     "subtitle": frozenset({"mov_text", "subrip", "webvtt", "ass", "text"}),
 }
 NEVER_DECODED = frozenset({"data", "attachment"})
-MAX_STREAMS = 32
+MAX_STREAMS = 32  # more streams than this: refused (counted with FFmpeg's own limit, so none is hidden)
+# Containers that can add streams after the header (MPEG-TS and PS, FLV, chained Ogg): before playback, read this
+# much further so that streams appearing later are on the list too. MP4, MKV, AVI and WMV declare them up front.
+LATE_STREAM_SCAN = 32 << 20
+_LATE_STREAM_DEMUXERS = ("mpegts", "mpeg", "mpegvideo", "flv", "ogg")
+
+
+def scan_bytes_for(demuxer: str) -> int:
+    return LATE_STREAM_SCAN if demuxer.split(",")[0] in _LATE_STREAM_DEMUXERS else 0
 
 REFUSED = ("This video uses a format that Media Reader x does not play ({what}). "
            "Media Reader x plays only common video and sound formats, to keep your PC safe.")
@@ -88,6 +96,10 @@ def _ffmpeg():
         "open": sig(fmt, "avformat_open_input", ctypes.c_int, ctypes.POINTER(vp), ctypes.c_char_p, vp,
                     ctypes.POINTER(vp)),
         "find_info": sig(fmt, "avformat_find_stream_info", ctypes.c_int, vp, vp),
+        "read_frame": sig(fmt, "av_read_frame", ctypes.c_int, vp, vp),
+        "packet_alloc": sig(codec, "av_packet_alloc", vp),
+        "packet_unref": sig(codec, "av_packet_unref", None, vp),
+        "packet_free": sig(codec, "av_packet_free", None, ctypes.POINTER(vp)),
         "close": sig(fmt, "avformat_close_input", None, ctypes.POINTER(vp)),
     }
 
@@ -96,16 +108,20 @@ def _ptr(address: int, offset: int) -> int:
     return ctypes.c_void_p.from_address(address + offset).value or 0
 
 
-def streams(f: BinaryIO, size: int, demuxer: str) -> list[tuple[str, str]]:
-    """Every stream of the open video ``f`` as (media type, codec name). Raises ProbeError."""
+def streams(f: BinaryIO, size: int, demuxer: str, scan_bytes: int = 0) -> list[tuple[str, str]]:
+    """Every stream of the open video ``f`` as (media type, codec name). With ``scan_bytes``, packets are read up
+    to that far into the file first, so that streams declared later are listed too. Raises ProbeError."""
     av = _ffmpeg()
     fmt = av["find_format"](demuxer.split(",")[0].encode("ascii"))
     if not fmt:
         raise ProbeError("demuxer missing")
 
+    consumed = [0]
+
     def read(_opaque, buf, n):
         try:
             data = f.read(n)
+            consumed[0] += len(data)
         except Exception:
             return AVERROR_EOF
         if not data:
@@ -133,27 +149,30 @@ def streams(f: BinaryIO, size: int, demuxer: str) -> list[tuple[str, str]]:
         if not ctx.value:
             raise MemoryError()
         ctypes.c_void_p.from_address(ctx.value + 32).value = io  # AVFormatContext.pb: custom input
-        for key, value in ((b"protocol_whitelist", b"none"), (b"max_streams", str(MAX_STREAMS).encode())):
-            av["dict_set"](ctypes.byref(opts), key, value, 0)
+        # FFmpeg's default stream limit (1000), as in Qt's player: a lower one here would hide streams the player sees.
+        av["dict_set"](ctypes.byref(opts), b"protocol_whitelist", b"none", 0)
         if av["open"](ctypes.byref(ctx), b"", fmt, ctypes.byref(opts)) < 0:
             ctx = ctypes.c_void_p()  # avformat_open_input frees the context on failure
             raise ProbeError("open failed")
+        # First the streams the header declares: a codec off the list is refused before FFmpeg's stream analysis
+        # opens any decoder (that matters most when this runs in the app, with protection off).
+        early = _list(av, ctx)
+        if early is not None and (len(early) > MAX_STREAMS or any(
+                name != "none" and kind not in NEVER_DECODED and name not in ALLOWED.get(kind, frozenset())
+                for kind, name in early)):
+            return early  # refused for sure: never analysed
         if av["find_info"](ctx, None) < 0:
             raise ProbeError("no stream information")
-        count = ctypes.c_uint.from_address(ctx.value + 44).value
-        if not 0 < count <= MAX_STREAMS:
-            raise ProbeError("bad stream count")
-        array = _ptr(ctx.value, 48)
-        found = []
-        for i in range(count):
-            stream = _ptr(array, i * 8)
-            params = _ptr(stream, 16) if stream else 0
-            if not params:
-                raise ProbeError("bad stream")
-            kind = ctypes.c_int.from_address(params).value
-            codec_id = ctypes.c_int.from_address(params + 4).value
-            name = av["codec_name"](codec_id) or b"unknown"
-            found.append((MEDIA_TYPES.get(kind, "unknown"), name.decode("ascii", "replace")))
+        if scan_bytes:
+            packet = ctypes.c_void_p(av["packet_alloc"]())
+            try:
+                while consumed[0] < scan_bytes and av["read_frame"](ctx, packet) >= 0:
+                    av["packet_unref"](packet)
+            finally:
+                av["packet_free"](ctypes.byref(packet))
+        found = _list(av, ctx)
+        if found is None:
+            raise ProbeError("no streams")
         return found
     finally:
         av["dict_free"](ctypes.byref(opts))
@@ -167,11 +186,32 @@ def streams(f: BinaryIO, size: int, demuxer: str) -> list[tuple[str, str]]:
         av["io_free"](ctypes.byref(io_ptr))
 
 
+def _list(av, ctx) -> list[tuple[str, str]] | None:
+    """The streams the format context holds now, or None when there are none."""
+    count = ctypes.c_uint.from_address(ctx.value + 44).value
+    if count == 0:
+        return None
+    if count > MAX_STREAMS:
+        return [("unknown", "too many streams")] * (MAX_STREAMS + 1)
+    array = _ptr(ctx.value, 48)
+    found = []
+    for i in range(count):
+        stream = _ptr(array, i * 8)
+        params = _ptr(stream, 16) if stream else 0
+        if not params:
+            raise ProbeError("bad stream")
+        kind = ctypes.c_int.from_address(params).value
+        codec_id = ctypes.c_int.from_address(params + 4).value
+        name = av["codec_name"](codec_id) or b"unknown"
+        found.append((MEDIA_TYPES.get(kind, "unknown"), name.decode("ascii", "replace")))
+    return found
+
+
 def refusal(found: list[tuple[str, str]]) -> str | None:
     """None when every decoded stream uses an allowed codec, else the user-facing reason."""
-    if not found or not any(kind == "video" for kind, _name in found):
-        return DAMAGED
     if len(found) > MAX_STREAMS:
+        return REFUSED.format(what=f"more than {MAX_STREAMS} streams")
+    if not found or not any(kind == "video" for kind, _name in found):
         return DAMAGED
     bad = sorted({name for kind, name in found
                   if kind not in NEVER_DECODED and name not in ALLOWED.get(kind, frozenset())})

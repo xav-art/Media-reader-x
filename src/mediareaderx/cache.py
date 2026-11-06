@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from pathlib import Path
 
-from mediareaderx.decoders import DecodedImage
+from mediareaderx.decoded import DecodedImage
 
 DEFAULT_BUDGET_BYTES = 160 * 1024**2
 

@@ -1,10 +1,10 @@
-Media Reader x 1.6.0: third-party notices
+Media Reader x 1.6.1: third-party notices
 =========================================
 
 1. Licences in short
 --------------------
 - Media Reader x's own source code is licensed under the MIT licence (LICENSE.txt). Source:
-  https://github.com/xav-art/Media-reader-x (tag v1.6.0).
+  https://github.com/xav-art/Media-reader-x (tag v1.6.1).
 - The binary distribution (Setup.exe, the portable zip and the installed app) also contains the
   third-party components in parts 2 and 3. Each component keeps its own licence.
 - One of them, x265, is licensed under GPL-2.0-or-later. It ships together with LGPL-3.0 libraries

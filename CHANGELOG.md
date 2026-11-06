@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.6.1 - 2026-11-05
+
+Memory: same speed, less memory.
+
+- The app's own process no longer loads numpy, Pillow or any codec (it decodes nothing since 1.6.0).
+- Fewer idle helpers: one spare video checker instead of two, no idle thumbnail helper, and extra helpers
+  exit after 30 to 60 seconds without work. A minute after you stop browsing, the helpers use about 70 MB
+  instead of about 280 MB (measured). The video checker itself is half the size (20 MB).
+- Opening a photo in a folder starts a second viewer helper at once, so slow photos (HEIC, RAW) preload in
+  parallel: in the benchmark every next and previous step was instant, where 1.6.0 waited about 1.5 s in
+  total. A busy helper is given a moment to finish before another one starts.
+
+Security (from a fresh adversarial review of 1.6.0):
+
+- Fixed: the video check stopped listing streams at 32, so stream 33 of a crafted MPEG-TS file could carry
+  any codec into the player. FFmpeg's own limit is used now, and more than 32 streams are refused. For
+  MPEG-TS, MPEG-PS, FLV and Ogg the check also reads on through 32 MB for streams that appear later.
+- Fixed: a taken-over helper could switch to the user's desktop and capture the screen. Helpers now run in
+  a window station of their own; the self-test checks that the user's desktop cannot be opened.
+- When protected decoding never worked on a PC, video thumbnails now pass the codec list too, the first
+  start gets two tries, and a new start is tried every 2 minutes.
+- Helper warnings are no longer written to the log (only their number). Pictures a helper returns may not be
+  larger than asked. Thumbnails no longer run FFmpeg's format probe in the app.
+- Helper slots are claimed with lock files in the user's own folder (no other user on a shared PC can block
+  them).
+- A codec named in a video's header is refused before FFmpeg's stream analysis decodes anything. A first
+  start that the window waits for no longer decides "protection does not work here" after 25 seconds.
+- docs/SANDBOX.md now says plainly what is left: video playback in the app (the largest remaining risk,
+  kept by choice), hidden data in returned pixels, and the Windows kernel as an escape route.
+
 ## 1.6.0 - 2026-11-05
 
 Security: protected decoding. Pictures, thumbnails and video checks run in locked-down helper processes.

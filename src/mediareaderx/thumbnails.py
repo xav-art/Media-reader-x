@@ -191,8 +191,9 @@ class VideoThumbnailer(QObject):
     failed = Signal(str)  # no frame within the timeout, or the video cannot be read
     TIMEOUT_MS = 4000
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, check=None):
         super().__init__(parent)
+        self._check = check or content.check_video  # the protected strip passes the codec-list check too
         self._queue: deque[str] = deque()
         self._current: str | None = None
         self._player = QMediaPlayer(self)  # no audio output attached: silent
@@ -234,7 +235,7 @@ class VideoThumbnailer(QObject):
             return
         self._current = self._queue.popleft()
         try:
-            content.check_video(self._current)  # FFmpeg only ever sees a known container
+            self._check(self._current)  # FFmpeg only ever sees a known container (and allowed codecs)
         except content.Refused:
             self._finish(None)
             return

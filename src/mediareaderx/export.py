@@ -10,8 +10,12 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from PIL import Image
+from typing import TYPE_CHECKING
+
 from PySide6.QtGui import QImage, QTransform
+
+if TYPE_CHECKING:
+    from PIL import Image
 
 from mediareaderx.metadata import EXIF_IFD, GPS_IFD
 
@@ -28,12 +32,16 @@ class ExportError(Exception):
 
 
 def qimage_to_pil(img: QImage) -> Image.Image:
+    from PIL import Image  # Pillow loads only when a copy is saved
+
     img = img.convertToFormat(QImage.Format.Format_RGBA8888)
     data = bytes(img.constBits())
     return Image.frombuffer("RGBA", (img.width(), img.height()), data, "raw", "RGBA", img.bytesPerLine(), 1)
 
 
 def _prepare_exif(exif_bytes: bytes | None, strip_gps: bool) -> bytes | None:
+    from PIL import Image
+
     if not exif_bytes:
         return None
     exif = Image.Exif()
@@ -56,6 +64,8 @@ def _prepare_exif(exif_bytes: bytes | None, strip_gps: bool) -> bytes | None:
 
 def export_image(frame: QImage, dest: str | Path, *, source: str | Path | None = None,
                  rotation: int = 0, exif_bytes: bytes | None = None, strip_gps: bool = False) -> Path:
+    from PIL import Image
+
     dest = Path(dest)
     if source is not None and dest.resolve() == Path(source).resolve():
         raise ExportError("Choose a different file name. Media Reader x never overwrites the original.")

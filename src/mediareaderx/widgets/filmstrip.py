@@ -10,10 +10,10 @@ from PySide6.QtCore import (QEvent, QItemSelectionModel, QObject, QPointF, QRect
 from PySide6.QtGui import QColor, QFont, QIcon, QImage, QPainter, QPixmap, QPolygonF
 from PySide6.QtWidgets import QAbstractItemView, QDockWidget, QListView, QListWidget, QListWidgetItem, QWidget
 
+from mediareaderx import sandbox, ui_text
 from mediareaderx.formats import MediaKind, kind_of
-from mediareaderx import ui_text
-from mediareaderx.theme import CORAL
 from mediareaderx.sandbox import make_thumbnail  # protected helpers
+from mediareaderx.theme import CORAL
 from mediareaderx.video_thumbs import ProtectedVideoThumbnailer
 from mediareaderx.widgets.video_view import fmt_ms
 
@@ -175,6 +175,8 @@ class Filmstrip(QDockWidget):
     def set_files(self, files: list[Path], current: int) -> None:
         if files != self._files:
             self._files = list(files)
+            if len(self._files) > 1 and self.isVisible():
+                sandbox.warm_thumbnails()  # the helper starts while the open photo decodes
             self._rows = {str(p): i for i, p in enumerate(self._files)}
             self._cancel_offscreen()
             self.list.clear()

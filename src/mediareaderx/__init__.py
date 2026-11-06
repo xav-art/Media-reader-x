@@ -10,7 +10,7 @@ os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 # so no file can make FFmpeg open a URL. Always set, never inherited: the environment cannot widen it.
 os.environ["QT_FFMPEG_PROTOCOL_WHITELIST"] = "file"
 
-__version__ = "1.6.0"
+__version__ = "1.6.1"
 APP_NAME = "Media Reader x"
 APP_ID = "MediaReaderX"
 ORG_NAME = "xav-art"

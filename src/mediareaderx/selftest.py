@@ -223,7 +223,8 @@ def _sandbox_checks(sandbox, resource_dir) -> None:
         secret = Path(tmp) / "secret.txt"
         secret.write_text("not for the helper", encoding="utf-8")
         results = sandbox.selfcheck(secret)
-    if results != {"read": "blocked", "network": "blocked", "process": "blocked", "screen": "blocked"}:
+    if results != {"read": "blocked", "network": "blocked", "process": "blocked", "screen": "blocked",
+                   "user_desktop": "blocked"}:
         raise AssertionError(f"helper not contained: {results}")
 
 

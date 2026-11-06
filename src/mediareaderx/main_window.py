@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QApplication, QFileDialog, QLabel, QMainWindow, Q
 from mediareaderx import APP_NAME, __version__, content, icons, recycle, sandbox, ui_text
 from mediareaderx.cache import DecodedCache, budget_for_screen, cache_key
 from mediareaderx.config import log_dir, settings_file
-from mediareaderx.decoders import DecodedImage, DecodeError
+from mediareaderx.decoded import DecodedImage, DecodeError
 from mediareaderx.export import ExportError, export_image
 from mediareaderx.folder import FolderNav, list_media
 from mediareaderx.formats import IMAGE_EXTS, RAW_EXTS, SVG_EXTS, VIDEO_EXTS, MediaKind, dialog_filter, kind_of
@@ -473,6 +473,8 @@ class MainWindow(QMainWindow):
             return
         self._add_recent(path)
         self.nav.set_current(path)
+        if kind is not MediaKind.VIDEO and len(self.nav.files) > 1:
+            sandbox.warm_viewers()  # browsing a folder: a second helper preloads neighbours in parallel
         self.filmstrip.set_files(self.nav.files, self.nav.index)
         self._show_overlay()
         if kind is MediaKind.VIDEO:

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
-from PIL import ExifTags, Image
+if TYPE_CHECKING:
+    from PIL import Image
 
 
 class MetaItem(NamedTuple):
@@ -89,6 +90,8 @@ def _dms_to_decimal(dms, ref) -> float | None:
 
 def gps_items(gps: dict) -> list[MetaItem]:
     """Decode a GPS IFD (tag id -> value) into readable rows."""
+    from PIL import ExifTags
+
     named = {ExifTags.GPSTAGS.get(k, str(k)): v for k, v in gps.items()}
     rows: list[MetaItem] = []
     lat = _dms_to_decimal(named.get("GPSLatitude"), named.get("GPSLatitudeRef"))
@@ -109,6 +112,8 @@ def gps_items(gps: dict) -> list[MetaItem]:
 
 
 def exif_items(exif: Image.Exif | None) -> list[MetaItem]:
+    from PIL import ExifTags  # here, not at the top: the app's own process never loads Pillow
+
     if not exif:
         return []
     tags: dict[str, object] = {}

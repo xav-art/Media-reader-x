@@ -13,7 +13,6 @@ import io
 import logging
 import os
 import struct
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -23,40 +22,13 @@ from PySide6.QtGui import QImage, QPainter
 from PySide6.QtSvg import QSvgRenderer
 
 from mediareaderx import config, content
+from mediareaderx.decoded import DecodedImage, DecodeError, check_file_size, image_kind  # noqa: F401
 from mediareaderx.formats import MediaKind, kind_of
 from mediareaderx.metadata import MetaItem, exif_items, file_items
 
 log = logging.getLogger(__name__)
 
 _registered = False
-
-
-class DecodeError(Exception):
-    """Raised with a user-facing message when a file cannot be shown."""
-
-
-@dataclass
-class DecodedImage:
-    frames: list[QImage]
-    durations_ms: list[int]
-    format_name: str
-    metadata: list[MetaItem] = field(default_factory=list)
-    exif_bytes: bytes | None = None  # original EXIF, reused by Save as
-    full_size: QSize | None = None  # the picture's real size when the frames are a smaller screen copy
-    notice: str | None = None  # set when the content is another format than the extension says
-
-    @property
-    def size(self) -> QSize:
-        """The picture's real size (upright), even when the frames are a screen copy."""
-        return self.full_size if self.full_size is not None else self.frames[0].size()
-
-    @property
-    def reduced(self) -> bool:
-        return self.full_size is not None and self.full_size != self.frames[0].size()
-
-    @property
-    def animated(self) -> bool:
-        return len(self.frames) > 1
 
 
 def _fit_side(width: int, height: int, max_side: int | None) -> tuple[int, int] | None:
@@ -351,6 +323,12 @@ def _decode_pillow(data: bytes, family: str, max_side: int | None = None) -> Dec
             durations.append(max(int(im.info.get("duration") or 100), 20))
         # EXIF sub-IFDs load lazily from the file, so read them before it closes.
         exif_rows, exif_bytes = exif_items(exif), _exif_bytes(exif)
+    if len(frames) == 1 and full_size is None and max_side and max(frames[0].width(), frames[0].height()) > max_side:
+        # An animation or multi-page file whose second frame did not fit the memory cap: one frame, shown like a
+        # still (a screen copy, full resolution on zoom).
+        full_size = frames[0].size()
+        frames[0] = frames[0].scaled(max_side, max_side, Qt.AspectRatioMode.KeepAspectRatio,
+                                     Qt.TransformationMode.SmoothTransformation)
     size = full_size or frames[0].size()
     meta = _image_items(fmt, size, len(frames), icc_rows) + exif_rows
     return DecodedImage(frames, durations, fmt, meta, exif_bytes, full_size)
@@ -511,21 +489,6 @@ def _decode_svg(data: bytes) -> DecodedImage:
     painter.end()
     rows = _image_items("SVG (vector)", base, 1)
     return DecodedImage([img], [0], "SVG", rows)
-
-
-def image_kind(ext: str) -> MediaKind:
-    """The image kind for a file named ``*{ext}``. Raises DecodeError for videos and unknown types."""
-    kind = kind_of(Path("file" + ext))
-    if kind is None or kind is MediaKind.VIDEO:
-        raise DecodeError(f"'{ext}' is not a supported image type.")
-    return kind
-
-
-def check_file_size(size: int) -> None:
-    if size > config.MAX_IMAGE_FILE_BYTES:
-        raise DecodeError("The file is larger than the 1 GB safety limit for images.")
-    if size == 0:
-        raise DecodeError("The file is empty.")
 
 
 def decode_bytes(data: bytes, ext: str, max_side: int | None = None) -> DecodedImage:

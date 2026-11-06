@@ -20,7 +20,7 @@ from PySide6.QtGui import (QColor, QFont, QFontMetricsF, QImage, QPageLayout, QP
                            QTransform)
 
 from mediareaderx import APP_NAME
-from mediareaderx.decoders import DecodeError
+from mediareaderx.decoded import DecodeError
 from mediareaderx.sandbox import decode  # protected helpers
 
 log = logging.getLogger(__name__)

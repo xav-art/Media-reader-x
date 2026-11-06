@@ -138,7 +138,9 @@ def _video(req: dict, f: BinaryIO) -> tuple[dict, list]:
         return {"ok": True, "refused": str(exc), "streams": []}, []
     f.seek(0)
     try:
-        found = videoprobe.streams(f, size, demuxer or "")
+        # Playback check: also read on, so streams that appear later in the file are listed too.
+        scan = 0 if req.get("frame") else videoprobe.scan_bytes_for(demuxer or "")
+        found = videoprobe.streams(f, size, demuxer or "", scan_bytes=scan)
     except videoprobe.ProbeError:
         return {"ok": True, "refused": videoprobe.DAMAGED, "streams": []}, []
     reply = {"ok": True, "notice": notice, "streams": [list(s) for s in found], "frames": [], "duration": 0}
@@ -181,7 +183,36 @@ def _selfcheck(req: dict) -> tuple[dict, list]:
     except OSError:
         results["process"] = "blocked"
     results["screen"] = _screen_capture()
+    results["user_desktop"] = _user_desktop()
     return {"ok": True, "results": results}, []
+
+
+def _user_desktop() -> str:
+    """"blocked" when the helper cannot open the user's window station or desktop (WinSta0\\Default)."""
+    import ctypes
+    import threading
+    from ctypes import wintypes as wt
+
+    user32 = ctypes.WinDLL("user32")
+    user32.OpenWindowStationW.restype = wt.HANDLE
+    user32.OpenWindowStationW.argtypes = [wt.LPCWSTR, wt.BOOL, wt.DWORD]
+    user32.OpenDesktopW.restype = wt.HANDLE
+    user32.OpenDesktopW.argtypes = [wt.LPCWSTR, wt.DWORD, wt.BOOL, wt.DWORD]
+    found = []
+
+    def attempt() -> None:  # a new thread, as an attacker would use: its desktop is not yet fixed
+        station = user32.OpenWindowStationW("WinSta0", False, 0x1 | 0x2 | 0x100)
+        desktop = user32.OpenDesktopW("Default", 0, False, 0x1 | 0x40 | 0x80)
+        found.extend(h for h in (station, desktop) if h)
+        if station:
+            user32.CloseWindowStation(wt.HANDLE(station))
+        if desktop:
+            user32.CloseDesktop(wt.HANDLE(desktop))
+
+    thread = threading.Thread(target=attempt)
+    thread.start()
+    thread.join()
+    return "open" if found else "blocked"
 
 
 def _screen_capture() -> str:

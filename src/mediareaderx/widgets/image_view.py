@@ -6,7 +6,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QImage, QPainter, QPixmap, QTransform, QWheelEvent
 from PySide6.QtWidgets import QFrame, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
 
-from mediareaderx.decoders import DecodedImage
+from mediareaderx.decoded import DecodedImage
 
 MIN_ZOOM, MAX_ZOOM = 0.02, 32.0
 # Opaque RGBA images (many PNGs) are otherwise copied into a new RGB32 pixmap: +183 MB at 48 MP.

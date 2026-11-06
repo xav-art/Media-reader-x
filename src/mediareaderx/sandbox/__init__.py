@@ -10,6 +10,8 @@ Policy when no helper can start (``state``):
   process, as Media Reader x 1.5 did, and say so once.
 - "failed": helpers worked on this PC before, and now cannot start. Files are not opened ("fail closed"),
   so nothing can force the app to drop the protection. A new attempt is made after ``RETRY_S``.
+  In "fallback", a background attempt runs every ``FALLBACK_RETRY_S``; the first helper that starts turns
+  protection on.
 - "off": turned off for development (environment variable MEDIAREADERX_SANDBOX=off).
 """
 
@@ -27,7 +29,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QSize, Signal
 
 from mediareaderx import config
-from mediareaderx.decoders import DecodedImage, DecodeError
+from mediareaderx.decoded import DecodedImage, DecodeError
 from mediareaderx.metadata import MetaItem, file_items
 from mediareaderx.sandbox import protocol
 
@@ -37,15 +39,21 @@ CAPABILITY = "xavArtMediaReaderXFiles"  # helpers hold it; the app folder lets i
 SLOT_PREFIX = "xav-art.MediaReaderX.Helper"
 OLD_PROFILES = ("xav-art.MediaReaderX.Decoder",)  # the 1.6 prototype's profile name
 SLOTS = 16  # shared by every running copy of the app: a slot is claimed with a per-user lock
-READY_TIMEOUT_S = 45
-IDLE_EXIT_S = 120
+READY_TIMEOUT_S = 90  # a first start on a PC whose antivirus scans every new process can be slow
+GUI_READY_TIMEOUT_S = 25  # a start the window waits for (opening a video, copy at full size) is cut shorter
+# Idle helpers beyond the spares exit after this long (memory goes back to the PC). Thumbnails come in bursts.
+IDLE_EXIT_S = {"view": 60, "thumb": 30, "check": 120}
+# A busy helper usually finishes a photo sooner than a new helper starts (about 1.5 s with warm codecs): wait
+# this long for one before starting another. Fewer helpers, same speed (measured, see docs/SANDBOX.md).
+SPAWN_AFTER_S = {"view": 0.6, "thumb": 0.4, "check": 0.0}
 ACQUIRE_WAIT_S = 30  # longest wait for a free helper; then "busy" (the GUI thread never waits for minutes)
 RETRY_S = 30
+FALLBACK_RETRY_S = 120
 GB = 1 << 30
 
 # role: (most helpers at once, memory limit per helper, reused for more files)
 ROLES = {"view": (2, 4 * GB, True), "thumb": (2, 1 * GB, True), "check": (3, 1 * GB, False)}
-SPARES = {"view": 1, "thumb": 1, "check": 2}  # started ahead and kept ready, so a file does not wait
+SPARES = {"view": 1, "thumb": 0, "check": 1}  # started ahead and kept ready, so a file does not wait
 TIMEOUTS = {"decode": 60, "decode_full": 120, "thumb": 20, "video": 25}
 
 BUSY = "Media Reader x is still busy with other files. Try again in a moment."
@@ -140,8 +148,8 @@ class _Pool:
         self.state = "off" if os.environ.get("MEDIAREADERX_SANDBOX", "").lower() == "off" else "new"
         self.worked_before = False
         self.failed_at = 0.0
-        self.desktop_handle = None
-        self.desktop_name = ""
+        self.station_handle = self.desktop_handle = None
+        self.desktop_name = ""  # "station\\desktop" of the helpers' own window station
         self.outer_job = None
         self.cap = None
         self.setup_lock = threading.Lock()
@@ -166,12 +174,30 @@ class _Pool:
                 winapi.grant_read(root, cap)
         total = max(2 * GB, min(8 * GB, winapi.physical_memory() // 2))
         self.outer_job = winapi.helpers_job(total)
-        self.desktop_name = f"MediaReaderX-{os.getpid()}"
-        self.desktop_handle = winapi.private_desktop(self.desktop_name, cap)
+        self._station_locked(winapi, cap)
         self.cap = cap
+        self.start_reaper()
+
+    def start_reaper(self) -> None:
         if self.reaper is None:
             self.reaper = threading.Thread(target=self._reap, name="sandbox-reaper", daemon=True)
             self.reaper.start()
+
+    def _station_locked(self, winapi, cap) -> None:
+        if self.station_handle is None:
+            self.station_handle, self.desktop_handle, self.desktop_name = winapi.private_station(
+                cap, f"Helpers-{os.getpid()}")
+
+    def prepare_station(self) -> None:
+        """Make the helpers' window station now, on the GUI thread (it switches this process's station for a
+        moment; doing it here means no other thread of the app makes a window meanwhile)."""
+        from mediareaderx.sandbox import winapi
+
+        with self.setup_lock:
+            try:
+                self._station_locked(winapi, winapi.capability(CAPABILITY))
+            except OSError as exc:  # the first helper start tries again and reports it
+                log.warning("Helper window station not ready: %s", exc)
 
     def _command(self, read_end: int, write_end: int, role: str) -> tuple[str, list[str], dict[str, str], str]:
         env = {"SystemRoot": os.environ.get("SystemRoot", r"C:\Windows"),
@@ -191,8 +217,8 @@ class _Pool:
         src = str(Path(mediareaderx.__file__).resolve().parent.parent)
         return str(Path(sys._base_executable).resolve()), ["-I", "-c", boot, *handles], env, src
 
-    def _spawn(self, role: str) -> _Helper:
-        """Start a helper and wait for its "ready". Raises OSError or protocol errors."""
+    def _spawn(self, role: str, ready_timeout: float = READY_TIMEOUT_S) -> _Helper:
+        """Start a helper and wait up to ``ready_timeout`` for its "ready". Raises OSError or protocol errors."""
         from mediareaderx.sandbox import winapi
 
         # Claim a slot no other running copy of the app holds: two live helpers never share a container.
@@ -200,7 +226,7 @@ class _Pool:
             candidates = list(self.free_slots)
         slot = claim = None
         for candidate in candidates:
-            claim = winapi.claim_slot(f"Global\\{SLOT_PREFIX}.{winapi.user_sid_string()}.{candidate}")
+            claim = winapi.claim_slot(winapi.local_appdata() / "MediaReaderX" / "helper-slots" / f"{candidate}.lock")
             if claim is None:
                 continue
             with self.cond:
@@ -236,7 +262,7 @@ class _Pool:
             for end in child_ends:
                 winapi.close(end)
             child_ends = []
-            timer = threading.Timer(READY_TIMEOUT_S, helper.kill)
+            timer = threading.Timer(ready_timeout, helper.kill)
             timer.start()
             try:
                 hello = protocol.read_header(helper.from_helper)
@@ -274,9 +300,12 @@ class _Pool:
 
     def _start_failed(self, exc: BaseException) -> None:
         """Only a PC where no helper has ever started falls back to in-process decoding. Once one worked (on this
-        PC before, or in this session), a failure fails closed, whatever caused it."""
+        PC before, or in this session), a failure fails closed, whatever caused it. While other helpers run,
+        one helper that does not start changes nothing: those keep working."""
         log.warning("Protected decoder could not start: %s", exc)
         with self.cond:
+            if self.state == "on" and any(h.proc for h in self.helpers):
+                return
             self.failed_at = time.monotonic()
         self._set_state("failed" if self.worked_before or self.state == "on" else "fallback")
 
@@ -307,24 +336,34 @@ class _Pool:
     def acquire(self, role: str) -> _Helper:
         most = ROLES[role][0]
         self._drop_dead()
-        deadline = time.monotonic() + ACQUIRE_WAIT_S
+        start = time.monotonic()
+        deadline = start + ACQUIRE_WAIT_S
+        attempts = 0
         while True:
             if time.monotonic() > deadline:
                 raise Busy()
             with self.cond:
                 for helper in self.helpers:
-                    if helper.role == role and not helper.busy:
+                    if helper.role == role and not helper.busy and (ROLES[role][2] or not helper.served):
                         helper.busy = True
                         return helper
                 live = sum(1 for h in self.helpers if h.role == role) + self.starting[role]
+                patience = start + SPAWN_AFTER_S[role] - time.monotonic()
+                if live and patience > 0:  # one is busy or starting: it is likely free before a new one starts
+                    self.cond.wait(patience)
+                    continue
+                if (self.state == "new" and self.starting[role] and not self.worked_before
+                        and threading.current_thread() is threading.main_thread()):
+                    raise Busy()  # a first start is under way: the window does not start (and wait for) another
                 if live < most and self.free_slots:
                     self.starting[role] += 1
                     generation = self.generation
                 else:
                     self.cond.wait(1.0)
                     continue
+            on_gui = threading.current_thread() is threading.main_thread()
             try:
-                helper = self._spawn(role)
+                helper = self._spawn(role, GUI_READY_TIMEOUT_S if on_gui else READY_TIMEOUT_S)
             except BaseException as exc:
                 with self.cond:
                     self.starting[role] -= 1
@@ -336,6 +375,16 @@ class _Pool:
                     with self.cond:
                         self.cond.wait(0.5)
                     continue
+                attempts += 1
+                if self.state == "new" and attempts < 2 and not on_gui and time.monotonic() < deadline:
+                    log.warning("Protected decoder could not start (%s): trying once more", exc)
+                    continue
+                if self.state == "new" and on_gui and not self.worked_before:
+                    # The window waited 25 s; a first start can take longer on a PC whose antivirus scans it. Let
+                    # the background start (two tries, 90 s each) decide; this file shows "still busy".
+                    log.warning("Protected decoder slow to start (%s): continuing in the background", exc)
+                    self.prewarm(role, want=1)
+                    raise Busy() from exc
                 self._start_failed(exc)
                 raise Unavailable() from exc
             if not self._adopt(helper, role, generation, busy=True):
@@ -378,19 +427,24 @@ class _Pool:
             if helper.role == "check":  # keep one fresh checker ready, so opening a video does not wait
                 self.prewarm("check")
 
-    def prewarm(self, role: str) -> None:
-        """Start helpers in the background until ``SPARES[role]`` unused ones are ready."""
+    def prewarm(self, role: str, want: int | None = None, retry: bool = False) -> None:
+        """Start helpers in the background until ``want`` (default ``SPARES[role]``) are ready for a file.
+        ``retry``: also in "fallback", to find out whether helpers work now."""
+        want = SPARES[role] if want is None else want
+
         def run() -> None:
             try:
-                if not self.usable():
+                if not retry and not self.usable():
                     return
             except Unavailable:
                 return
+            attempts = 0
             while True:
                 with self.cond:
                     mine = [h for h in self.helpers if h.role == role]
-                    spares = sum(1 for h in mine if not h.busy and not h.served) + self.starting[role]
-                    if (spares >= SPARES[role] or len(mine) + self.starting[role] >= ROLES[role][0]
+                    ready = sum(1 for h in mine if not h.busy and (ROLES[role][2] or not h.served))
+                    spares = ready + self.starting[role]
+                    if (spares >= want or len(mine) + self.starting[role] >= ROLES[role][0]
                             or not self.free_slots):
                         return
                     self.starting[role] += 1
@@ -402,8 +456,13 @@ class _Pool:
                         self.starting[role] -= 1
                         self.cond.notify_all()
                         stale = generation != self.generation
-                    if not stale and not isinstance(exc, NoSlot):
-                        self._start_failed(exc)
+                    if stale or isinstance(exc, NoSlot):
+                        return
+                    attempts += 1
+                    if self.state == "new" and attempts < 2:
+                        log.warning("Protected decoder could not start (%s): trying once more", exc)
+                        continue
+                    self._start_failed(exc)
                     return
                 if not self._adopt(helper, role, generation, busy=False):
                     return
@@ -414,14 +473,17 @@ class _Pool:
 
     def _reap(self) -> None:
         while True:
-            time.sleep(15)
+            time.sleep(10)
             now = time.monotonic()
+            if self.state == "fallback" and now - self.failed_at > FALLBACK_RETRY_S:
+                self.failed_at = now
+                self.prewarm("view", want=1, retry=True)
             idle = []
             with self.cond:
                 for role in ROLES:
                     mine = [h for h in self.helpers if h.role == role and not h.busy]
                     for h in mine[SPARES[role]:]:
-                        if now - h.last_used > IDLE_EXIT_S:
+                        if now - h.last_used > IDLE_EXIT_S[role]:
                             idle.append(h)
                 for h in idle:
                     self.helpers.remove(h)
@@ -443,10 +505,9 @@ class _Pool:
                 with self.cond:
                     self.free_slots.append(h.slot)
             # Start from scratch next time: a new desktop and job (helpers must never point at a closed desktop).
-            if self.desktop_handle:
-                winapi.close_desktop(self.desktop_handle)
+            winapi.close_station(self.station_handle, self.desktop_handle)
             winapi.close(self.outer_job)
-            self.desktop_handle = self.outer_job = self.cap = None
+            self.station_handle = self.desktop_handle = self.outer_job = self.cap = None
             with self.cond:
                 self.cond.notify_all()
 
@@ -470,12 +531,27 @@ def state() -> str:
 def start() -> None:
     """Start a viewer helper and a video checker in the background, so the first file does not wait."""
     if sys.platform == "win32" and _pool.state != "off":
+        _pool.start_reaper()
+        _pool.prepare_station()
         _pool.prewarm("view")
         _pool.prewarm("check")
 
 
 def shutdown() -> None:
     _pool.shutdown()
+
+
+def warm_viewers() -> None:
+    """The user browses a folder: keep two viewer helpers, so slow photos (HEIC, RAW: about 1 s each) preload in
+    parallel. The second one exits after ``IDLE_EXIT_S["view"]`` without work."""
+    if sys.platform == "win32" and _pool.state not in ("off", "fallback"):
+        _pool.prewarm("view", want=ROLES["view"][0])
+
+
+def warm_thumbnails() -> None:
+    """A folder is about to fill the thumbnail strip: start a thumbnail helper now, alongside the photo's decode."""
+    if sys.platform == "win32" and _pool.state not in ("off", "fallback"):
+        _pool.prewarm("thumb", want=1)
 
 
 def remove_profiles() -> None:
@@ -517,9 +593,8 @@ def _request(role: str, op: str, path: Path, extra: dict, timeout: int, read_rep
         timer.start()
         header = protocol.read_header(helper.from_helper)
         notes = header.get("notes")
-        for note in notes[:20] if isinstance(notes, list) else []:
-            if isinstance(note, str):
-                log.info("Decoder: %s", protocol.clean_text(note, 200))
+        if isinstance(notes, list) and notes:  # their text stays out of the log: it can carry text from the file
+            log.debug("Decoder warnings: %d", min(len(notes), 20))
         if header.get("ok") is not True:  # a clean refusal: the helper is fine and stays
             if _blobs(header):
                 raise protocol.ProtocolError("blobs with an error")
@@ -571,7 +646,7 @@ def _read_frames(header: dict, f, max_frames: int, max_pixels: int, max_total: i
     return [protocol.read_image(f, spec, size, max_pixels) for spec, size in zip(frames, blobs)]
 
 
-def _read_decoded(header: dict, f) -> DecodedImage:
+def _read_decoded(header: dict, f, max_side: int | None = None) -> DecodedImage:
     frames_spec = header.get("frames")
     count = len(frames_spec) if isinstance(frames_spec, list) else 0
     exif_len = header.get("exif", 0)
@@ -600,6 +675,16 @@ def _read_decoded(header: dict, f) -> DecodedImage:
     format_name = protocol.clean_text(header.get("format_name", ""), 60)
     notice = protocol.optional_text(header, "notice")
     total = config.MAX_ANIMATION_BYTES if count > 1 else config.MAX_IMAGE_PIXELS * 4
+    if max_side and count == 1 and full is None:  # a still that was not reduced: SVG renders up to 4096 px
+        spec = frames_spec[0]
+        if (not isinstance(spec, list) or len(spec) != 3 or not protocol._is_int(spec[0], 1, max(max_side, 4096) + 2)
+                or not protocol._is_int(spec[1], 1, max(max_side, 4096) + 2)):
+            raise protocol.ProtocolError("picture larger than asked")
+    if max_side and count == 1 and full is not None:  # a screen copy: never larger than asked
+        spec = frames_spec[0]
+        if (not isinstance(spec, list) or len(spec) != 3 or not protocol._is_int(spec[0], 1, max_side + 2)
+                or not protocol._is_int(spec[1], 1, max_side + 2)):
+            raise protocol.ProtocolError("screen copy larger than asked")
     frames = _read_frames(header, f, config.MAX_ANIMATION_FRAMES, config.MAX_IMAGE_PIXELS, total)
     exif = whitelist_exif(protocol.read_exact(f, exif_len)) if exif_len else None
     return DecodedImage(frames, durations, format_name, metadata, exif, QSize(*full) if full else None, notice)
@@ -654,25 +739,42 @@ def whitelist_exif(raw: bytes) -> bytes | None:
         return None
 
 
-def _read_thumb(header: dict, f):
-    frames = _read_frames(header, f, 1, 4096 * 4096, 4096 * 4096 * 4)
+def _small_frames(header: dict, f, side: int) -> list:
+    """At most one frame, no larger than ``side`` (+2 for rounding) on either side."""
+    limit = side + 2
+    frames = header.get("frames")
+    if isinstance(frames, list) and frames:
+        spec = frames[0]
+        if (not isinstance(spec, list) or len(spec) != 3 or not protocol._is_int(spec[0], 1, limit)
+                or not protocol._is_int(spec[1], 1, limit)):
+            raise protocol.ProtocolError("thumbnail larger than asked")
+    return _read_frames(header, f, 1, limit * limit, limit * limit * 4)
+
+
+def _read_thumb(header: dict, f, side: int = 192):
+    frames = _small_frames(header, f, side)
     return frames[0] if frames else None
 
 
 # -- public API -------------------------------------------------------------------------------------------
 def decode(path: str | Path, max_side: int | None = None) -> DecodedImage:
     """``decoders.decode``, protected. Raises DecodeError."""
-    from mediareaderx import decoders
+    from mediareaderx.decoded import image_kind
 
     path = Path(path)
-    decoders.image_kind(path.suffix)
+    image_kind(path.suffix)
     try:
         if not _pool.usable():
+            from mediareaderx import decoders  # in this process only when protection is off
+
             return decoders.decode(path, max_side)
         op_timeout = TIMEOUTS["decode" if max_side else "decode_full"]
-        image = _request("view", "decode", path, {"max_side": max_side}, op_timeout, _read_decoded)
+        image = _request("view", "decode", path, {"max_side": max_side}, op_timeout,
+                         lambda header, f: _read_decoded(header, f, max_side))
     except Unavailable:
         if _pool.state == "fallback":
+            from mediareaderx import decoders
+
             return decoders.decode(path, max_side)
         raise DecodeError(UNAVAILABLE) from None
     except Busy:
@@ -686,22 +788,30 @@ def decode(path: str | Path, max_side: int | None = None) -> DecodedImage:
 
 def make_thumbnail(path: str | Path, side: int = 192):
     """``thumbnails.make_thumbnail``, protected: a QImage or None."""
-    from mediareaderx import thumbnails
-
     path = Path(path)
+
+    def in_process():
+        from mediareaderx import thumbnails  # numpy and the codecs load here only when protection is off
+
+        return thumbnails.make_thumbnail(path, side)
+
     try:
         if not _pool.usable():
-            return thumbnails.make_thumbnail(path, side)
-        return _request("thumb", "thumb", path, {"side": side}, TIMEOUTS["thumb"], _read_thumb)
+            return in_process()
+        return _request("thumb", "thumb", path, {"side": side}, TIMEOUTS["thumb"],
+                        lambda header, f: _read_thumb(header, f, side))
     except Unavailable:
-        return thumbnails.make_thumbnail(path, side) if _pool.state == "fallback" else None
+        return in_process() if _pool.state == "fallback" else None
     except (DecodeError, Busy):
         return None
 
 
-def _check_in_process(path: Path) -> str | None:
+def check_video_in_process(path: str | Path, scan: bool = True) -> str | None:
+    """``check_video`` without a helper (protection off or never worked): container and codec list. ``scan``
+    reads on for late streams (before playback; thumbnails skip it)."""
     from mediareaderx import content, videoprobe
 
+    path = Path(path)
     notice = content.check_video(path)
     try:
         with open(path, "rb") as f:
@@ -709,7 +819,8 @@ def _check_in_process(path: Path) -> str | None:
             size = os.fstat(f.fileno()).st_size
             demuxer = content.ffmpeg_demuxer(head, path.suffix.lower(), at_end=size <= len(head)) or ""
             f.seek(0)
-            found = videoprobe.streams(f, size, demuxer)
+            found = videoprobe.streams(f, size, demuxer,
+                                       scan_bytes=videoprobe.scan_bytes_for(demuxer) if scan else 0)
     except (videoprobe.ProbeError, OSError):
         raise content.Refused(videoprobe.DAMAGED) from None
     if (reason := videoprobe.refusal(found)) is not None:
@@ -746,11 +857,11 @@ def check_video(path: str | Path) -> str | None:
 
     try:
         if not _pool.usable():
-            return _check_in_process(path)
+            return check_video_in_process(path)
         found = _request("check", "video", path, {"frame": False}, TIMEOUTS["video"], read)
     except Unavailable:
         if _pool.state == "fallback":
-            return _check_in_process(path)
+            return check_video_in_process(path)
         raise content.Refused(UNAVAILABLE) from None
     except Busy:
         raise content.Refused(BUSY) from None
@@ -764,13 +875,9 @@ def check_video(path: str | Path) -> str | None:
 def video_thumbnail(path: str | Path, side: int = 192):
     """(frame or None, length in ms) for the thumbnail strip, from a helper. Raises UseInProcess when the
     strip should use its in-process thumbnailer instead (protected decoding off or never worked here)."""
-    from mediareaderx import content, videoprobe
+    from mediareaderx import videoprobe
 
-    path = Path(path)
-    try:
-        content.check_video(path)
-    except content.Refused:
-        return None, 0
+    path = Path(path)  # no FFmpeg probe here: the helper checks the container before anything else
 
     def read(header: dict, f):
         if header.get("refused") is not None:
@@ -781,7 +888,7 @@ def video_thumbnail(path: str | Path, side: int = 192):
         duration = header.get("duration", 0)
         if not protocol._is_int(duration, 0, 1 << 40):
             raise protocol.ProtocolError("bad duration")
-        frames = _read_frames(header, f, 1, 4096 * 4096, 4096 * 4096 * 4)
+        frames = _small_frames(header, f, side)
         if videoprobe.refusal(found) is not None:
             return None, 0
         return (frames[0] if frames else None), duration
@@ -817,5 +924,6 @@ def selfcheck(probe_path: Path) -> dict:
         _pool.release(helper, keep)
 
 
-__all__ = ["decode", "make_thumbnail", "check_video", "video_thumbnail", "configure", "start", "shutdown",
+__all__ = ["decode", "make_thumbnail", "check_video", "check_video_in_process", "video_thumbnail", "configure",
+           "start", "shutdown",
            "state", "notifier", "Unavailable", "UseInProcess", "in_process", "remove_profiles", "selfcheck"]

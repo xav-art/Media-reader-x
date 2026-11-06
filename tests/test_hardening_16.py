@@ -203,3 +203,18 @@ def test_recent_files_can_be_turned_off(qapp, tmp_path):
     window._add_recent(path)
     assert window._recent() == [] and window.settings.value("last_dir") is None
     window.close()
+
+
+@pytest.mark.parametrize("line, secret", [
+    (r"path:D:\Photos\Jane.jpg", "Jane"),
+    ("source:file:///D:/Holiday/Jane.mp4", "Jane"),
+    ("Error:" + chr(92) * 2 + "server" + chr(92) + "share" + chr(92) + "Jane.png", "server"),  # a UNC path
+    ("dst=/D:/Private/Jane.jpg", "Jane"),
+    ("open //fileserver/hr/Jane.png failed", "fileserver"),
+])
+def test_redaction_after_colons_and_slashes(line, secret):
+    assert secret not in redact(line)
+
+
+def test_redaction_keeps_urls_and_times():
+    assert redact("see http://example.com/a at 12:30:45") == "see http://example.com/a at 12:30:45"

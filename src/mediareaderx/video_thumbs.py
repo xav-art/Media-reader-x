@@ -21,6 +21,15 @@ log = logging.getLogger(__name__)
 _IN_PROCESS = "in-process"
 
 
+def _fallback_check(path: str):
+    """The in-process strip's check: refuse once protection works again (the strip asks again via a helper)."""
+    from mediareaderx import content
+
+    if not sandbox.in_process():
+        raise content.Refused("protected decoding is on again")
+    return sandbox.check_video_in_process(path, scan=False)
+
+
 class ProtectedVideoThumbnailer(QObject):
     ready = Signal(str, QImage, int)  # path, frame, duration in ms (0 if unknown)
     failed = Signal(str)
@@ -38,6 +47,18 @@ class ProtectedVideoThumbnailer(QObject):
         return self._fallback.current if self._fallback is not None else self._current
 
     def request(self, path: str) -> None:
+        if self._fallback is not None and not sandbox.in_process():
+            # Protection works again (it can start later on a PC where it failed): stop decoding in this process.
+            # Its waiting files go back to the strip, which asks again (now through a helper).
+            dropped = [p for p in [*self._fallback._queue, self._fallback.current] if p]
+            self._fallback.clear()
+            if self._fallback.current:
+                self._fallback.release(self._fallback.current)
+            self._fallback.deleteLater()
+            self._fallback = None
+            for item in dropped:
+                if item != path:
+                    self.failed.emit(item)
         if self._fallback is not None:
             self._fallback.request(path)
             return
@@ -85,7 +106,7 @@ class ProtectedVideoThumbnailer(QObject):
         if img == _IN_PROCESS:
             from mediareaderx.thumbnails import VideoThumbnailer
 
-            self._fallback = VideoThumbnailer(self)
+            self._fallback = VideoThumbnailer(self, check=_fallback_check)
             self._fallback.ready.connect(self.ready)
             self._fallback.failed.connect(self.failed)
             pending, self._queue, self._current = [path, *self._queue], deque(), None
